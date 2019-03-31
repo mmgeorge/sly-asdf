@@ -7,5 +7,5 @@ Can be installed from MELPA or manually.
 
 Installing manually will require the contrib be registered in SLY's `sly-contrib` variable. 
 ```
-(add-to-list 'sly-contribs 'sly-hello-world 'append)
+(add-to-list 'sly-contribs 'sly-asdf 'append)
 ```
