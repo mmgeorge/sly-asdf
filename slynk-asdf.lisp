@@ -1,5 +1,5 @@
 ;;; slynk-asdf.lisp -- ASDF support
-;;
+;;; Ported from swank-asdf <https://github.com/slime/slime/blob/master/contrib/swank-asdf.lisp>
 ;; Authors: Daniel Barlow <dan@telent.net>
 ;;          Marco Baringer <mb@bese.it>
 ;;          Edi Weitz <edi@agharta.de>
@@ -8,14 +8,143 @@
 ;; License: Public Domain
 
 (defpackage :slynk-asdf
-  (:use :cl :slynk-api)
+  (:use :cl :slynk-api :slynk-backend)
+  (:import-from :slynk)
   (:export))
 
 (in-package :slynk-asdf)
 
 
+(defvar *recompile-system* nil)
+(defvar *pathname-component* (make-hash-table :test 'equal))
+
+
+;;; Callable by RPC
+
+(defslyfun who-depends-on (system)
+  (flet ((system-dependencies (op system)
+           (mapcar (lambda (dep)
+                     (asdf::coerce-name (if (consp dep) (second dep) dep)))
+                   (cdr (assoc op (asdf:component-depends-on op system))))))
+    (let ((system-name (asdf::coerce-name system))
+          (result))
+      (asdf::map-systems
+       (lambda (system)
+         (when (member system-name
+                       (system-dependencies 'asdf:load-op system)
+                       :test #'string=)
+           (push (asdf:component-name system) result))))
+      result)))
+
+
+(defslyfun operate-on-system-for-emacs (system-name operation &rest keywords)
+  "Compile and load SYSTEM using ASDF.
+Record compiler notes signalled as `compiler-condition's."
+  (slynk::collect-notes
+   (lambda ()
+     (apply #'operate-on-system system-name operation keywords))))
+
+
+(defslyfun list-all-systems-in-central-registry ()
+  "Returns a list of all systems in ASDF's central registry
+AND in its source-registry. (legacy name)"
+  (unique-string-list
+   (mapcar
+    #'pathname-name
+    (while-collecting (c)
+      (loop for dir in asdf:*central-registry*
+            for defaults = (eval dir)
+            when defaults
+            do (collect-asds-in-directory defaults #'c))
+      (asdf:ensure-source-registry)
+      (if (or #+asdf3 t
+	      #-asdf3 (asdf:version-satisfies (asdf:asdf-version) "2.15"))
+          (loop :for k :being :the :hash-keys :of asdf::*source-registry*
+		:do (c k))
+	  #-asdf3
+          (dolist (entry (asdf::flatten-source-registry))
+            (destructuring-bind (directory &key recurse exclude) entry
+              (register-asd-directory
+               directory
+               :recurse recurse :exclude exclude :collect #'c))))))))
+
+
+(defslyfun list-all-systems-known-to-asdf ()
+  "Returns a list of all systems ASDF knows already."
+  (while-collecting (c)
+    (asdf::map-systems (lambda (system) (c (asdf:component-name system))))))
+
+
+(defslyfun list-asdf-systems ()
+  "Returns the systems in ASDF's central registry and those which ASDF
+already knows."
+  (unique-string-list
+   (list-all-systems-known-to-asdf)
+   (list-all-systems-in-central-registry)))
+
+(defslyfun asdf-system-files (name)
+  (let* ((system (asdf:find-system name))
+         (files (mapcar #'namestring
+                        (cons
+                         (asdf:system-definition-pathname system)
+                         (asdf-component-source-files system))))
+         (main-file (find name files
+                          :test #'equalp :key #'pathname-name :start 1)))
+    (if main-file
+        (cons main-file (remove main-file files
+                                :test #'equal :count 1))
+        files)))
+
+
+(defslyfun reload-system (name)
+  (let ((*recompile-system* (asdf:find-system name)))
+    (operate-on-system-for-emacs name 'asdf:load-op)))
+
+
+(defslyfun asdf-system-loaded-p (name)
+  (component-loaded-p name))
+
+
+(defslyfun asdf-system-directory (name)
+  (namestring (translate-logical-pathname (asdf:system-source-directory name))))
+
+
+(defslyfun asdf-determine-system (file buffer-package-name)
+  (or
+   (and file
+        (pathname-system file))
+   (and file
+        (progn
+          ;; If not found, let's rebuild the table first
+          (recompute-pathname-component-table)
+          (pathname-system file)))
+   ;; If we couldn't find an already defined system,
+   ;; try finding a system that's named like BUFFER-PACKAGE-NAME.
+   (loop with package = (guess-buffer-package buffer-package-name)
+         for name in (slynk::package-names package)
+         for system = (asdf:find-system (asdf::coerce-name name) nil)
+         when (and system
+                   (or (not file)
+                       (pathname-system file)))
+         return (asdf:component-name system))))
+
+
+(defslyfun delete-system-fasls (name)
+  (let ((removed-count
+         (loop for file in (asdf-component-output-files
+                            (asdf:find-system name))
+               when (probe-file file)
+               count it
+               and
+               do (delete-file file))))
+    (format nil "~d file~:p ~:*~[were~;was~:;were~] removed" removed-count)))
+
+
+;;; Internal
+
 (defun asdf-at-least (version)
   (asdf:version-satisfies (asdf:asdf-version) version))
+
 
 (defmacro asdefs (version &rest defs)
   (flet ((defun* (version name aname rest)
@@ -40,17 +169,19 @@
                  ((defmethod) (defmethod* version aname args))
                  ((defvar) (defvar* name aname args)))))))
 
+
 (asdefs "2.15"
  (defvar *wild* #-cormanlisp :wild #+cormanlisp "*")
 
  (defun collect-asds-in-directory (directory collect)
    (map () collect (directory-asd-files directory)))
-
+        
  (defun register-asd-directory (directory &key recurse exclude collect)
    (if (not recurse)
        (collect-asds-in-directory directory collect)
        (collect-sub*directories-asd-files
         directory :exclude exclude :collect collect))))
+
 
 (asdefs "2.16"
  (defun load-sysdef (name pathname)
@@ -66,7 +197,7 @@
              pathname package)
             (load pathname))
      (delete-package package))))
-
+        
  (defun directory* (pathname-spec &rest keys &key &allow-other-keys)
    (apply 'directory pathname-spec
           (append keys
@@ -82,6 +213,8 @@
                          #+sbcl
                          (when (find-symbol "RESOLVE-SYMLINKS" '#:sb-impl)
                            '(:resolve-symlinks nil)))))))
+
+
 (asdefs "2.17"
  (defun collect-sub*directories-asd-files
      (directory &key
@@ -114,6 +247,7 @@
 
  (defun directory-asd-files (directory)
    (directory-files directory asdf::*wild-asd*)))
+
 
 (asdefs "2.19"
     (defun subdirectories (directory)
@@ -156,6 +290,7 @@
                              (make-pathname-component-logical
                               (last dir))))))))))))
 
+
 (asdefs "2.21"
  (defun component-loaded-p (c)
    (and (gethash 'load-op (asdf::component-operation-times
@@ -187,6 +322,7 @@
     :type (make-pathname-component-logical (pathname-type pathname))
     :version (make-pathname-component-logical (pathname-version pathname)))))
 
+
 (asdefs "2.22"
  (defun directory-files (directory &optional (pattern asdf::*wild-file*))
    (let ((dir (pathname directory)))
@@ -211,6 +347,7 @@
                          :version (make-pathname-component-logical
                                    (pathname-version f)))))))))
 
+
 (asdefs "2.26.149"
  (defmethod component-relative-pathname ((system asdf:system))
    (asdf::coerce-pathname
@@ -223,11 +360,9 @@
                       pathname)))
 
 
-;;; Taken from ASDF 1.628
 (defmacro while-collecting ((&rest collectors) &body body)
   `(asdf::while-collecting ,collectors ,@body))
 
-;;; Now for SLIME-specific stuff
 
 (defun asdf-operation (operation)
   (or (asdf::find-symbol* operation :asdf)
@@ -243,9 +378,8 @@
       (dolist (c (asdf:module-components component))
         (map-component-subcomponents fn c)))))
 
-;;; Maintaining a pathname to component table
 
-(defvar *pathname-component* (make-hash-table :test 'equal))
+;;; Maintaining a pathname to component table
 
 (defun clear-pathname-component-table ()
   (clrhash *pathname-component*))
@@ -271,21 +405,8 @@
 
 (recompute-pathname-component-table)
 
+
 ;;; This is a crude hack, see ASDF's LP #481187.
-(defslyfun who-depends-on (system)
-  (flet ((system-dependencies (op system)
-           (mapcar (lambda (dep)
-                     (asdf::coerce-name (if (consp dep) (second dep) dep)))
-                   (cdr (assoc op (asdf:component-depends-on op system))))))
-    (let ((system-name (asdf::coerce-name system))
-          (result))
-      (asdf::map-systems
-       (lambda (system)
-         (when (member system-name
-                       (system-dependencies 'asdf:load-op system)
-                       :test #'string=)
-           (push (asdf:component-name system) result))))
-      result)))
 
 (defmethod xref-doit ((type (eql :depends-on)) thing)
   (when (typep thing '(or string symbol))
@@ -299,12 +420,6 @@
                          `(:snippet ,(format nil "(defsystem :~A" dependency)
                            :align t))))))
 
-(defslyfun operate-on-system-for-emacs (system-name operation &rest keywords)
-  "Compile and load SYSTEM using ASDF.
-Record compiler notes signalled as `compiler-condition's."
-  (slynk::collect-notes
-   (lambda ()
-     (apply #'operate-on-system system-name operation keywords))))
 
 (defun operate-on-system (system-name operation-name &rest keyword-args)
   "Perform OPERATION-NAME on SYSTEM-NAME using ASDF.
@@ -319,43 +434,35 @@ Example:
     ((or asdf:compile-error #+asdf3 asdf/lisp-build:compile-file-error)
       () nil)))
 
+
+(defun make-operation (x)
+  #+#.(slynk-backend:with-symbol 'make-operation 'asdf)
+  (asdf:make-operation x)
+  #-#.(slynk-backend:with-symbol 'make-operation 'asdf)
+  (make-instance x))
+
+
+(defmethod asdf:operation-done-p :around
+    ((operation asdf:compile-op)
+     component)
+    (unless (eql *recompile-system*
+                 (asdf:component-system component))
+      (call-next-method)))
+
+
 (defun unique-string-list (&rest lists)
   (sort (delete-duplicates (apply #'append lists) :test #'string=) #'string<))
 
-(defslyfun list-all-systems-in-central-registry ()
-  "Returns a list of all systems in ASDF's central registry
-AND in its source-registry. (legacy name)"
-  (unique-string-list
-   (mapcar
-    #'pathname-name
-    (while-collecting (c)
-      (loop for dir in asdf:*central-registry*
-            for defaults = (eval dir)
-            when defaults
-            do (collect-asds-in-directory defaults #'c))
-      (asdf:ensure-source-registry)
-      (if (or #+asdf3 t
-	      #-asdf3 (asdf:version-satisfies (asdf:asdf-version) "2.15"))
-          (loop :for k :being :the :hash-keys :of asdf::*source-registry*
-		:do (c k))
-	  #-asdf3
-          (dolist (entry (asdf::flatten-source-registry))
-            (destructuring-bind (directory &key recurse exclude) entry
-              (register-asd-directory
-               directory
-               :recurse recurse :exclude exclude :collect #'c))))))))
 
-(defslyfun list-all-systems-known-to-asdf ()
-  "Returns a list of all systems ASDF knows already."
-  (while-collecting (c)
-    (asdf::map-systems (lambda (system) (c (asdf:component-name system))))))
-
-(defslyfun list-asdf-systems ()
-  "Returns the systems in ASDF's central registry and those which ASDF
-already knows."
-  (unique-string-list
-   (list-all-systems-known-to-asdf)
-   (list-all-systems-in-central-registry)))
+(defun asdf-component-source-files (component)
+  (if (typep component 'asdf:package-inferred-system)
+      (asdf-inferred-system-source-files component)
+      (while-collecting (c)
+        (labels ((f (x)
+                   (typecase x
+                     (asdf:source-file (c (asdf:component-pathname x)))
+                     (asdf:module (map () #'f (asdf:module-components x))))))
+          (f component)))))
 
 
 (defun asdf-inferred-system-source-files (system)
@@ -369,6 +476,18 @@ already knows."
                 ".lisp"
                 )))))
       (mapcar #'dep-pathname (asdf-inferred-system-deps system)))))
+
+
+(defun asdf-component-output-files (component)
+  ;; TODO - package-inferred-system
+  (while-collecting (c)
+    (labels ((f (x)
+               (typecase x
+                 (asdf:source-file
+                  (map () #'c
+                       (asdf:output-files (make-operation 'asdf:compile-op) x)))
+                 (asdf:module (map () #'f (asdf:module-components x))))))
+      (f component))))
 
 
 (defun asdf-inferred-system-deps (system &optional (visited nil))
@@ -385,112 +504,11 @@ already knows."
                 (asdf:component-name other)))
 
 
-(defun asdf-component-source-files (component)
-  (if (typep component 'asdf:package-inferred-system)
-      (asdf-inferred-system-source-files component)
-      (while-collecting (c)
-        (labels ((f (x)
-                   (typecase x
-                     (asdf:source-file (c (asdf:component-pathname x)))
-                     (asdf:module (map () #'f (asdf:module-components x))))))
-          (f component)))))
-
-(defun make-operation (x)
-  #+#.(slynk-backend:with-symbol 'make-operation 'asdf)
-  (asdf:make-operation x)
-  #-#.(slynk-backend:with-symbol 'make-operation 'asdf)
-  (make-instance x))
-
-
-
-
-
-(defun asdf-component-output-files (component)
-  ;; TODO - package-inferred-system
-  (while-collecting (c)
-    (labels ((f (x)
-               (typecase x
-                 (asdf:source-file
-                  (map () #'c
-                       (asdf:output-files (make-operation 'asdf:compile-op) x)))
-                 (asdf:module (map () #'f (asdf:module-components x))))))
-      (f component))))
-
-(defslyfun asdf-system-files (name)
-  (let* ((system (asdf:find-system name))
-         (files (mapcar #'namestring
-                        (cons
-                         (asdf:system-definition-pathname system)
-                         (asdf-component-source-files system))))
-         (main-file (find name files
-                          :test #'equalp :key #'pathname-name :start 1)))
-    (if main-file
-        (cons main-file (remove main-file files
-                                :test #'equal :count 1))
-        files)))
-
-(defslyfun asdf-system-loaded-p (name)
-  (component-loaded-p name))
-
-(defslyfun asdf-system-directory (name)
-  (namestring (translate-logical-pathname (asdf:system-source-directory name))))
-
 (defun pathname-system (pathname)
   (let ((component (pathname-component pathname)))
     (when component
       (asdf:component-name (asdf:component-system component)))))
 
-(defslyfun asdf-determine-system (file buffer-package-name)
-  (or
-   (and file
-        (pathname-system file))
-   (and file
-        (progn
-          ;; If not found, let's rebuild the table first
-          (recompute-pathname-component-table)
-          (pathname-system file)))
-   ;; If we couldn't find an already defined system,
-   ;; try finding a system that's named like BUFFER-PACKAGE-NAME.
-   (loop with package = (guess-buffer-package buffer-package-name)
-         for name in (package-names package)
-         for system = (asdf:find-system (asdf::coerce-name name) nil)
-         when (and system
-                   (or (not file)
-                       (pathname-system file)))
-         return (asdf:component-name system))))
-
-(defslyfun delete-system-fasls (name)
-  (let ((removed-count
-         (loop for file in (asdf-component-output-files
-                            (asdf:find-system name))
-               when (probe-file file)
-               count it
-               and
-               do (delete-file file))))
-    (format nil "~d file~:p ~:*~[were~;was~:;were~] removed" removed-count)))
-
-(defvar *recompile-system* nil)
-
-(defmethod asdf:operation-done-p :around
-    ((operation asdf:compile-op)
-     component)
-    (unless (eql *recompile-system*
-                 (asdf:component-system component))
-      (call-next-method)))
-
-(defslyfun reload-system (name)
-  (let ((*recompile-system* (asdf:find-system name)))
-    (operate-on-system-for-emacs name 'asdf:load-op)))
-
-;; Doing list-all-systems-in-central-registry might be quite slow
-;; since it accesses a file-system, so run it once at the background
-;; to initialize caches.
-;; (when (eql *communication-style* :spawn)
-;;   (spawn (lambda ()
-;;            (ignore-errors (list-all-systems-in-central-registry)))
-;;          :name "init-asdf-fs-caches"))
-
-;;; Hook for compile-file-for-emacs
 
 (defun try-compile-file-with-asdf (pathname load-p &rest options)
   (declare (ignore options))
@@ -504,13 +522,9 @@ already knows."
           (asdf:perform (make-operation 'asdf:load-op) component))
         (values t t nil (first (asdf:output-files op component)))))))
 
+
 (defun try-compile-asd-file (pathname load-p &rest options)
   (declare (ignore load-p options))
   (when (equalp (pathname-type pathname) "asd")
     (load-asd pathname)
     (values t t nil pathname)))
-
-;;; (pushnew 'try-compile-asd-file *compile-file-for-emacs-hook*)
-
-;;; (pushnew 'try-compile-file-with-asdf *compile-file-for-emacs-hook*)
-

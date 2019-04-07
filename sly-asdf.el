@@ -3,7 +3,7 @@
 ;; Version: 0.1
 ;; URL: https://github.com/mmgeorge/sly-asdf
 ;; Keywords: languages, lisp, sly, asdf
-;; Package-Requires: ((sly "1.0.0-beta2"))
+;; Package-Requires: ((emacs "24")(sly "1.0.0-beta2"))
 ;; Maintainer: Matt George <mmge93@gmail.com>
 ;;
 ;; This file is free software; you can redistribute it and/or modify
@@ -101,8 +101,6 @@ buffer's working directory"
       (rgrep regexp "*.lisp"
              (sly-asdf-from-lisp-filename
               (sly-eval `(slynk-asdf:asdf-system-directory ,sys-name)))))
-
-  
   (defun sly-asdf-rgrep-system ()
     (interactive)
     (error "This command is only supported on GNU Emacs >21.x")))
@@ -131,8 +129,6 @@ buffer's working directory"
                           (car buffers)
                         (second (memq current-buffer buffers))))))))
         (isearch-forward)))
-
-
   (defun sly-asdf-isearch-system ()
     (interactive)
     (error "This command is only supported on GNU Emacs >23.1.x")))
@@ -171,6 +167,7 @@ DELIMITED is optional.  Includes the base system and all other systems it depend
     (when (y-or-n-p (format "Descend into system `%s'? " dep))
       (sly-asdf-query-replace-system dep from to delimited))))
 
+
 (defun sly-asdf-delete-system-fasls (name)
   "Delete FASLs produced by compiling a system with NAME."
   (interactive (list (sly-asdf-read-system-name)))
@@ -182,7 +179,7 @@ DELIMITED is optional.  Includes the base system and all other systems it depend
 (defun sly-asdf-who-depends-on (system-name)
   "Determine who depends on system with SYSTEM-NAME."
   (interactive (list (sly-asdf-read-system-name)))
-  (sly-asdf-xref :depends-on system-name))
+  (sly-xref :depends-on system-name))
 
 
 ;;; Utilities
