@@ -30,7 +30,6 @@
 ;;; Code:
 
 (require 'sly)
-(require 'sly-mrepl)
 (require 'cl-lib)
 (require 'grep)
 
@@ -43,7 +42,6 @@
             "Stas Boukarev       <stassats@gmail.com>"
             "Tobias C Rittweiler <tcr@freebits.de>")
   (:license "GPL")
-  (:sly-dependencies sly-mrepl)
   (:slynk-dependencies slynk-asdf))
 
 
