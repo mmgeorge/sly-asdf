@@ -74,7 +74,7 @@ buffer's working directory"
       `(slynk-asdf:asdf-system-files ,system)
     (lambda (files)
       (dolist (file files)
-        (let ((buffer (get-file-buffer (sly-asdf-from-lisp-filename file))))
+        (let ((buffer (get-file-buffer (sly-from-lisp-filename file))))
           (when buffer
             (with-current-buffer buffer
               (save-buffer buffer)))))
@@ -87,7 +87,7 @@ buffer's working directory"
   (sly-eval-async `(slynk-asdf:asdf-system-directory ,name)
     (lambda (directory)
       (when directory
-        (dired (sly-asdf-from-lisp-filename directory))))))
+        (dired (sly-from-lisp-filename directory))))))
 
 
 (if (fboundp 'rgrep)
@@ -97,7 +97,7 @@ buffer's working directory"
                           (list (sly-asdf-read-system-name nil nil t)
                                 (grep-read-regexp))))
       (rgrep regexp "*.lisp"
-             (sly-asdf-from-lisp-filename
+             (sly-from-lisp-filename
               (sly-eval `(slynk-asdf:asdf-system-directory ,sys-name)))))
   (defun sly-asdf-rgrep-system ()
     (interactive)
@@ -108,7 +108,7 @@ buffer's working directory"
     (defun sly-asdf-isearch-system (sys-name)
       "Run `isearch-forward' on the files of an ASDF system."
       (interactive (list (sly-asdf-read-system-name nil nil t)))
-      (let* ((files (mapcar 'sly-asdf-from-lisp-filename
+      (let* ((files (mapcar 'sly-from-lisp-filename
                             (sly-eval `(slynk-asdf:asdf-system-files ,sys-name))))
              (multi-isearch-next-buffer-function
               (lexical-let*
@@ -141,7 +141,7 @@ buffer's working directory"
       ;; `tags-query-replace' actually uses `query-replace-regexp'
       ;; internally.
       (tags-query-replace (regexp-quote from) to delimited
-                          '(mapcar 'sly-asdf-from-lisp-filename
+                          '(mapcar 'sly-from-lisp-filename
                                    (sly-eval `(slynk-asdf:asdf-system-files ,name))))
     (error
      ;; Kludge: `tags-query-replace' does not actually return but
