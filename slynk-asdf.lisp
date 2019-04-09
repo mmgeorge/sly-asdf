@@ -19,6 +19,36 @@
 (defvar *pathname-component* (make-hash-table :test 'equal))
 
 
+;;; Macros
+
+(defmacro while-collecting ((&rest collectors) &body body)
+  `(asdf::while-collecting ,collectors ,@body))
+
+
+(defmacro asdefs (version &rest defs)
+  (flet ((defun* (version name aname rest)
+           `(progn
+              (defun ,name ,@rest)
+              (declaim (notinline ,name))
+              (when (asdf-at-least ,version)
+                (setf (fdefinition ',name) (fdefinition ',aname)))))
+         (defmethod* (version aname rest)
+           `(unless (asdf-at-least ,version)
+              (defmethod ,aname ,@rest)))
+         (defvar* (name aname rest)
+           `(progn
+              (define-symbol-macro ,name ,aname)
+              (defvar ,aname ,@rest))))
+    `(progn
+       ,@(loop :for (def name . args) :in defs
+               :for aname = (intern (string name) :asdf)
+               :collect
+               (ecase def
+                 ((defun) (defun* version name aname args))
+                 ((defmethod) (defmethod* version aname args))
+                 ((defvar) (defvar* name aname args)))))))
+
+
 ;;; Callable by RPC
 
 (defslyfun who-depends-on (system)
@@ -144,30 +174,6 @@ already knows."
 
 (defun asdf-at-least (version)
   (asdf:version-satisfies (asdf:asdf-version) version))
-
-
-(defmacro asdefs (version &rest defs)
-  (flet ((defun* (version name aname rest)
-           `(progn
-              (defun ,name ,@rest)
-              (declaim (notinline ,name))
-              (when (asdf-at-least ,version)
-                (setf (fdefinition ',name) (fdefinition ',aname)))))
-         (defmethod* (version aname rest)
-           `(unless (asdf-at-least ,version)
-              (defmethod ,aname ,@rest)))
-         (defvar* (name aname rest)
-           `(progn
-              (define-symbol-macro ,name ,aname)
-              (defvar ,aname ,@rest))))
-    `(progn
-       ,@(loop :for (def name . args) :in defs
-               :for aname = (intern (string name) :asdf)
-               :collect
-               (ecase def
-                 ((defun) (defun* version name aname args))
-                 ((defmethod) (defmethod* version aname args))
-                 ((defvar) (defvar* name aname args)))))))
 
 
 (asdefs "2.15"
@@ -359,9 +365,6 @@ already knows."
    (asdf::load-sysdef (or name (string-downcase (pathname-name pathname)))
                       pathname)))
 
-
-(defmacro while-collecting ((&rest collectors) &body body)
-  `(asdf::while-collecting ,collectors ,@body))
 
 
 (defun asdf-operation (operation)
