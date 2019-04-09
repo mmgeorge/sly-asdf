@@ -241,7 +241,7 @@ in the directory of the current buffer."
            (or default-value
                (if determine-default-accurately
                    (sly-asdf-determine-asdf-system (buffer-file-name)
-                                              (sly-asdf-current-package))
+                                              (sly-current-package))
                  (sly-asdf-find-asd-file (or default-directory
                                         (buffer-file-name))
                                     system-names))))
