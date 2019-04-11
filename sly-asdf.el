@@ -182,9 +182,9 @@ DELIMITED is optional.  Includes the base system and all other systems it depend
 
 ;;; Utilities
 
-(defgroup sly-asdf-asdf nil
+(defgroup sly-asdf nil
   "ASDF support for Sly."
-  :prefix "sly-asdf-asdf-"
+  :prefix "sly-asdf-"
   :group 'sly)
 
 
@@ -268,7 +268,7 @@ Returns it if it's in SYSTEM-NAMES."
   "Try to determine the asdf system provided BUFFER-PACKAGE that FILENAME belongs to."
   (sly-eval
    `(slynk-asdf:asdf-determine-system ,(and filename
-                                            (sly-asdf-to-lisp-filename filename))
+                                            (sly-to-lisp-filename filename))
                                       ,buffer-package)))
 
 
@@ -277,17 +277,16 @@ Returns it if it's in SYSTEM-NAMES."
   (sly-eval `(slynk-asdf:who-depends-on ,system)))
 
 
-(defcustom sly-asdf-asdf-collect-notes t
+(defcustom sly-asdf-collect-notes t
   "Collect and display notes produced by the compiler.
-
 See also `sly-asdf-highlight-compiler-notes' and
 `sly-compilation-finished-hook'."
-  :group 'sly-asdf-asdf)
+  :group 'sly-asdf)
 
 
-(defun sly-asdf-asdf-operation-finished-function (system)
+(defun sly-asdf-operation-finished-function (system)
   "Operation finished function for SYSTEM."
-  (if sly-asdf-asdf-collect-notes
+  (if sly-asdf-collect-notes
       #'sly-compilation-finished
     (sly-asdf-curry (lambda (system result)
                  (let (sly-asdf-highlight-compiler-notes
