@@ -169,7 +169,7 @@ DELIMITED is optional.  Includes the base system and all other systems it depend
 (defun sly-asdf-delete-system-fasls (name)
   "Delete FASLs produced by compiling a system with NAME."
   (interactive (list (sly-asdf-read-system-name)))
-  (sly-asdf-repl-shortcut-eval-async
+  (sly-eval-async
    `(slynk-asdf:delete-system-fasls ,name)
    'message))
 

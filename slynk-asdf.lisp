@@ -459,7 +459,7 @@ Example:
 
 (defun asdf-component-source-files (component)
   (if (typep component 'asdf:package-inferred-system)
-      (asdf-inferred-system-source-files component)
+      (asdf-inferred-system-files component ".lisp")
       (while-collecting (c)
         (labels ((f (x)
                    (typecase x
@@ -468,7 +468,7 @@ Example:
           (f component)))))
 
 
-(defun asdf-inferred-system-source-files (system)
+(defun asdf-inferred-system-files (system ending)
   (let ((system-pathname (asdf:component-pathname system)))
     (flet ((dep-pathname (dep)
              (let ((name (asdf:component-name dep)))
@@ -476,21 +476,21 @@ Example:
                 'string
                 (namestring system-pathname )
                 (subseq name (1+ (position #\/ name)))
-                ".lisp"
-                )))))
+                ending)))))
       (mapcar #'dep-pathname (asdf-inferred-system-deps system)))))
 
 
 (defun asdf-component-output-files (component)
-  ;; TODO - package-inferred-system
-  (while-collecting (c)
-    (labels ((f (x)
-               (typecase x
-                 (asdf:source-file
-                  (map () #'c
-                       (asdf:output-files (make-operation 'asdf:compile-op) x)))
-                 (asdf:module (map () #'f (asdf:module-components x))))))
-      (f component))))
+  (if (typep component 'asdf:package-inferred-system)
+      (asdf-inferred-system-files component ".fasl")
+      (while-collecting (c)
+        (labels ((f (x)
+                   (typecase x
+                     (asdf:source-file
+                      (map () #'c
+                           (asdf:output-files (make-operation 'asdf:compile-op) x)))
+                     (asdf:module (map () #'f (asdf:module-components x))))))
+          (f component)))))
 
 
 (defun asdf-inferred-system-deps (system &optional (visited nil))
