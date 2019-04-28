@@ -30,11 +30,11 @@
 ;;; Code:
 
 (require 'sly)
-(require 'sly-mrepl)
 (require 'cl-lib)
 (require 'grep)
 
 
+(defvar sly-mrepl-shortcut-alist) ;; declared in sly-mrepl
 (defvar sly-asdf-shortcut-alist
   '(("load-system" . sly-asdf-load-system)
     ("reload-system" . sly-asdf-reload-system)
@@ -137,8 +137,10 @@ buffer's working directory"
     (isearch-forward)))
 
 
-(defun sly-asdf-query-replace-system (name from to &optional delimited)
+(defun sly-asdf-query-replace-system (_name from to &optional delimited)
   "Run `query-replace' on an ASDF system with NAME given FROM and TO with optional DELIMITED."
+  ;; MG: Underscore added to _name to suppress an unused-lexical-arg warning that fires
+  ;; despite the var being used in the condition-case below.
   (interactive (let ((system (sly-asdf-read-system-name)))
                  (cons system (sly-asdf-read-query-replace-args
                                "Query replace throughout `%s'" system))))
@@ -147,7 +149,7 @@ buffer's working directory"
       ;; internally.
       (tags-query-replace (regexp-quote from) to delimited
                           '(mapcar 'sly-from-lisp-filename
-                                   (sly-eval `(slynk-asdf:asdf-system-files ,name))))
+                                   (sly-eval `(slynk-asdf:asdf-system-files ,_name))))
     (error
      ;; Kludge: `tags-query-replace' does not actually return but
      ;; signals an unnamed error with the below error
