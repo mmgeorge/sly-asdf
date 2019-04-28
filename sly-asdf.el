@@ -30,8 +30,16 @@
 ;;; Code:
 
 (require 'sly)
+(require 'sly-mrepl)
 (require 'cl-lib)
 (require 'grep)
+
+
+(defvar sly-asdf-shortcut-alist
+  '(("load-system" . sly-asdf-load-system)
+    ("reload-system" . sly-asdf-reload-system)
+    ("browse-system" . sly-asdf-browse-system)
+    ("save-system" . sly-asdf-save-system)))
 
 
 (define-sly-contrib sly-asdf
@@ -42,7 +50,9 @@
             "Stas Boukarev       <stassats@gmail.com>"
             "Tobias C Rittweiler <tcr@freebits.de>")
   (:license "GPL")
-  (:slynk-dependencies slynk-asdf))
+  (:slynk-dependencies slynk-asdf)
+  (:on-load
+   (add-to-list 'sly-mrepl-shortcut-alist 'sly-asdf-shortcut-alist 'append)))
 
 
 ;;; Interactive functions
@@ -56,7 +66,9 @@ buffer's working directory"
 
 
 (defun sly-asdf-reload-system (system)
-  "Reload an ASDF SYSTEM without reloading its dependencies."
+  "Compile and load an ASDF SYSTEM without reloading dependencies.
+Default system name is taken from first file matching *.asd in current
+buffer's working directory"
   (interactive (list (sly-asdf-read-system-name)))
   (sly-asdf-save-some-lisp-buffers)
   ;;(sly-asdf-display-output-buffer)
@@ -90,46 +102,38 @@ buffer's working directory"
         (dired (sly-from-lisp-filename directory))))))
 
 
-(if (fboundp 'rgrep)
-    (defun sly-asdf-rgrep-system (sys-name regexp)
-      "Run `rgrep' on the base directory of an ASDF system."
-      (interactive (progn (grep-compute-defaults)
-                          (list (sly-asdf-read-system-name nil nil t)
-                                (grep-read-regexp))))
-      (rgrep regexp "*.lisp"
-             (sly-from-lisp-filename
-              (sly-eval `(slynk-asdf:asdf-system-directory ,sys-name)))))
-  (defun sly-asdf-rgrep-system ()
-    (interactive)
-    (error "This command is only supported on GNU Emacs >21.x")))
+(defun sly-asdf-rgrep-system (sys-name regexp)
+  "Run `rgrep' for REGEXP for SYS-NAME on the base directory of an ASDF system."
+  (interactive (progn (grep-compute-defaults)
+                      (list (sly-asdf-read-system-name nil nil t)
+                            (grep-read-regexp))))
+  (rgrep regexp "*.lisp"
+         (sly-from-lisp-filename
+          (sly-eval `(slynk-asdf:asdf-system-directory ,sys-name)))))
 
 
-(if (boundp 'multi-isearch-next-buffer-function)
-    (defun sly-asdf-isearch-system (sys-name)
-      "Run `isearch-forward' on the files of an ASDF system."
-      (interactive (list (sly-asdf-read-system-name nil nil t)))
-      (let* ((files (mapcar 'sly-from-lisp-filename
-                            (sly-eval `(slynk-asdf:asdf-system-files ,sys-name))))
-             (multi-isearch-next-buffer-function
-              (lexical-let*
-                  ((buffers-forward  (mapcar #'find-file-noselect files))
-                   (buffers-backward (reverse buffers-forward)))
-                #'(lambda (current-buffer wrap)
-                    ;; Contrarily to the docstring of
-                    ;; `multi-isearch-next-buffer-function', the first
-                    ;; arg is not necessarily a buffer. Report sent
-                    ;; upstream. (2009-11-17)
-                    (setq current-buffer (or current-buffer (current-buffer)))
-                    (let* ((buffers (if isearch-forward
-                                        buffers-forward
-                                      buffers-backward)))
-                      (if wrap
-                          (car buffers)
-                        (second (memq current-buffer buffers))))))))
-        (isearch-forward)))
-  (defun sly-asdf-isearch-system ()
-    (interactive)
-    (error "This command is only supported on GNU Emacs >23.1.x")))
+(defun sly-asdf-isearch-system (sys-name)
+  "Run function `isearch-forward' on the files of an ASDF system SYS-NAME."
+  (interactive (list (sly-asdf-read-system-name nil nil t)))
+  (let* ((files (mapcar 'sly-from-lisp-filename
+                        (sly-eval `(slynk-asdf:asdf-system-files ,sys-name))))
+         (multi-isearch-next-buffer-function
+          (let*
+              ((buffers-forward  (mapcar #'find-file-noselect files))
+               (buffers-backward (reverse buffers-forward)))
+            #'(lambda (current-buffer wrap)
+                ;; Contrarily to the docstring of
+                ;; `multi-isearch-next-buffer-function', the first
+                ;; arg is not necessarily a buffer. Report sent
+                ;; upstream. (2009-11-17)
+                (setq current-buffer (or current-buffer (current-buffer)))
+                (let* ((buffers (if isearch-forward
+                                    buffers-forward
+                                  buffers-backward)))
+                  (if wrap
+                      (car buffers)
+                    (cl-second (memq current-buffer buffers))))))))
+    (isearch-forward)))
 
 
 (defun sly-asdf-query-replace-system (name from to &optional delimited)
@@ -174,10 +178,10 @@ DELIMITED is optional.  Includes the base system and all other systems it depend
    'message))
 
 
-(defun sly-asdf-who-depends-on (system-name)
-  "Determine who depends on system with SYSTEM-NAME."
+(defun sly-asdf-who-depends-on (sys-name)
+  "Determine who depends on system with SYS-NAME."
   (interactive (list (sly-asdf-read-system-name)))
-  (sly-xref :depends-on system-name))
+  (sly-xref :depends-on sys-name))
 
 
 ;;; Utilities
@@ -207,15 +211,6 @@ alist but ignores CDRs."
   ;;(and (memq major-mode slime-lisp-modes)
   ;;(not (null buffer-file-name)))))
   (save-some-buffers))
-
-
-(defun sly-asdf-display-output-buffer ()
-  "Display the output buffer and scroll to bottom."
-  (with-current-buffer (sly-asdf-output-buffer)
-    (goto-char (point-max))
-    (unless (get-buffer-window (current-buffer) t)
-      (display-buffer (current-buffer) t))
-    (sly-asdf-repl-show-maximum-output)))
 
 
 (defun sly-asdf-read-query-replace-args (format-string &rest format-args)
@@ -277,27 +272,8 @@ Returns it if it's in SYSTEM-NAMES."
   (sly-eval `(slynk-asdf:who-depends-on ,system)))
 
 
-(defcustom sly-asdf-collect-notes t
-  "Collect and display notes produced by the compiler.
-See also `sly-asdf-highlight-compiler-notes' and
-`sly-compilation-finished-hook'."
-  :group 'sly-asdf)
-
-
-(defun sly-asdf-operation-finished-function (system)
-  "Operation finished function for SYSTEM."
-  (if sly-asdf-collect-notes
-      #'sly-compilation-finished
-    (sly-asdf-curry (lambda (system result)
-                 (let (sly-asdf-highlight-compiler-notes
-                       sly-compilation-finished-hook)
-                   (sly-compilation-finished result)))
-               system)))
-
-
 (defun sly-asdf-oos (system operation &rest keyword-args)
   "Operate On System.  Apply the given OPERATION on SYSTEM provided KEYWORD-ARGS."
-  (sly-asdf-save-some-lisp-buffers)
   (message "Performing ASDF %S%s on system %S"
            operation (if keyword-args (format " %S" keyword-args) "")
            system)
@@ -305,6 +281,10 @@ See also `sly-asdf-highlight-compiler-notes' and
       `(slynk-asdf:operate-on-system-for-emacs ,system ',operation ,@keyword-args)
     #'(lambda (result)
         (sly-compilation-finished result (current-buffer)))))
+
+
+;;;###autoload
+(add-to-list 'sly-contribs 'sly-asdf 'append)
 
 
 (provide 'sly-asdf)

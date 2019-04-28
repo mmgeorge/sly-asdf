@@ -458,12 +458,25 @@ Example:
 
 
 (defun asdf-component-source-files (component)
-  (if (typep component 'asdf:package-inferred-system)
+  (if (and #+asdf3 (typep component 'asdf:package-inferred-system))
       (asdf-inferred-system-files component ".lisp")
       (while-collecting (c)
         (labels ((f (x)
                    (typecase x
                      (asdf:source-file (c (asdf:component-pathname x)))
+                     (asdf:module (map () #'f (asdf:module-components x))))))
+          (f component)))))
+
+
+(defun asdf-component-output-files (component)
+  (if (and #+asdf3 (typep component 'asdf:package-inferred-system))
+      (asdf-inferred-system-files component ".fasl")
+      (while-collecting (c)
+        (labels ((f (x)
+                   (typecase x
+                     (asdf:source-file
+                      (map () #'c
+                           (asdf:output-files (make-operation 'asdf:compile-op) x)))
                      (asdf:module (map () #'f (asdf:module-components x))))))
           (f component)))))
 
@@ -478,19 +491,6 @@ Example:
                 (subseq name (1+ (position #\/ name)))
                 ending)))))
       (mapcar #'dep-pathname (asdf-inferred-system-deps system)))))
-
-
-(defun asdf-component-output-files (component)
-  (if (typep component 'asdf:package-inferred-system)
-      (asdf-inferred-system-files component ".fasl")
-      (while-collecting (c)
-        (labels ((f (x)
-                   (typecase x
-                     (asdf:source-file
-                      (map () #'c
-                           (asdf:output-files (make-operation 'asdf:compile-op) x)))
-                     (asdf:module (map () #'f (asdf:module-components x))))))
-          (f component)))))
 
 
 (defun asdf-inferred-system-deps (system &optional (visited nil))
@@ -513,21 +513,22 @@ Example:
       (asdf:component-name (asdf:component-system component)))))
 
 
-(defun try-compile-file-with-asdf (pathname load-p &rest options)
-  (declare (ignore options))
-  (let ((component (pathname-component pathname)))
-    (when component
-      ;;(format t "~&Compiling ASDF component ~S~%" component)
-      (let ((op (make-operation 'asdf:compile-op)))
-        (with-compilation-hooks ()
-          (asdf:perform op component))
-        (when load-p
-          (asdf:perform (make-operation 'asdf:load-op) component))
-        (values t t nil (first (asdf:output-files op component)))))))
+;; MG: slynk:*compile-for-emacs-hook* is not exposed
+;; (defun try-compile-file-with-asdf (pathname load-p &rest options)
+;;   (declare (ignore options))
+;;   (let ((component (pathname-component pathname)))
+;;     (when component
+;;       ;;(format t "~&Compiling ASDF component ~S~%" component)
+;;       (let ((op (make-operation 'asdf:compile-op)))
+;;         (with-compilation-hooks ()
+;;           (asdf:perform op component))
+;;         (when load-p
+;;           (asdf:perform (make-operation 'asdf:load-op) component))
+;;         (values t t nil (first (asdf:output-files op component)))))))
 
 
-(defun try-compile-asd-file (pathname load-p &rest options)
-  (declare (ignore load-p options))
-  (when (equalp (pathname-type pathname) "asd")
-    (load-asd pathname)
-    (values t t nil pathname)))
+;; (defun try-compile-asd-file (pathname load-p &rest options)
+;;   (declare (ignore load-p options))
+;;   (when (equalp (pathname-type pathname) "asd")
+;;     (load-asd pathname)
+;;     (values t t nil pathname)))
