@@ -3,7 +3,7 @@
 ;; Version: 0.1
 ;; URL: https://github.com/mmgeorge/sly-asdf
 ;; Keywords: languages, lisp, sly, asdf
-;; Package-Requires: ((emacs "24")(sly "1.0.0-beta2"))
+;; Package-Requires: ((emacs "24.3")(sly "1.0.0-beta2"))
 ;; Maintainer: Matt George <mmge93@gmail.com>
 ;;
 ;; This file is free software; you can redistribute it and/or modify
@@ -254,7 +254,7 @@ in the directory of the current buffer."
     (or
      (cl-find-if #'(lambda (file) (string-equal "asd" (file-name-extension file)))
                  (directory-files directory))
-     (and (file-name-directory fname) 
+     (and (file-name-directory fname)
           (sly-asdf-find-system-file (file-name-directory fname))))))
 
 
