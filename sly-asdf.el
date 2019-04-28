@@ -52,7 +52,8 @@
   (:license "GPL")
   (:slynk-dependencies slynk-asdf)
   (:on-load
-   (add-to-list 'sly-mrepl-shortcut-alist 'sly-asdf-shortcut-alist 'append)))
+   (setq sly-mrepl-shortcut-alist
+         (append sly-mrepl-shortcut-alist sly-asdf-shortcut-alist))))
 
 
 ;;; Interactive functions
@@ -105,7 +106,7 @@ buffer's working directory"
 (defun sly-asdf-rgrep-system (sys-name regexp)
   "Run `rgrep' for REGEXP for SYS-NAME on the base directory of an ASDF system."
   (interactive (progn (grep-compute-defaults)
-                      (list (sly-asdf-read-system-name nil nil t)
+                      (list (sly-asdf-read-system-name nil nil)
                             (grep-read-regexp))))
   (rgrep regexp "*.lisp"
          (sly-from-lisp-filename
@@ -114,7 +115,7 @@ buffer's working directory"
 
 (defun sly-asdf-isearch-system (sys-name)
   "Run function `isearch-forward' on the files of an ASDF system SYS-NAME."
-  (interactive (list (sly-asdf-read-system-name nil nil t)))
+  (interactive (list (sly-asdf-read-system-name nil nil)))
   (let* ((files (mapcar 'sly-from-lisp-filename
                         (sly-eval `(slynk-asdf:asdf-system-files ,sys-name))))
          (multi-isearch-next-buffer-function
@@ -221,9 +222,7 @@ alist but ignores CDRs."
     (list (nth 0 common) (nth 1 common) (nth 2 common))))
 
 
-(defun sly-asdf-read-system-name (&optional prompt
-                                       default-value
-                                       determine-default-accurately)
+(defun sly-asdf-read-system-name (&optional prompt default-value)
   "Read a system name from the minibuffer, prompting with PROMPT.
 If no DEFAULT-VALUE is given, one is tried to be determined: if
 DETERMINE-DEFAULT-ACCURATELY is true, by an RPC request which
@@ -233,13 +232,7 @@ in the directory of the current buffer."
          (prompt (or prompt "System"))
          (system-names (sly-eval `(slynk-asdf:list-asdf-systems)))
          (default-value
-           (or default-value
-               (if determine-default-accurately
-                   (sly-asdf-determine-asdf-system (buffer-file-name)
-                                              (sly-current-package))
-                 (sly-asdf-find-asd-file (or default-directory
-                                        (buffer-file-name))
-                                    system-names))))
+           (or default-value (sly-asdf-find-current-system)))
          (prompt (concat prompt (if default-value
                                     (format " (default `%s'): " default-value)
                                   ": "))))
@@ -248,15 +241,21 @@ in the directory of the current buffer."
                      'sly-asdf-system-history default-value)))
 
 
-(defun sly-asdf-find-asd-file (directory system-names)
-  "Try to find an ASDF system definition file in the DIRECTORY.
-Returns it if it's in SYSTEM-NAMES."
-  (let ((asd-files
-         (directory-files (file-name-directory directory) nil "\.asd$")))
-    (cl-loop for system in asd-files
-             for candidate = (file-name-sans-extension system)
-             when (cl-find candidate system-names :test #'string-equal)
-             do (cl-return candidate))))
+(defun sly-asdf-find-current-system ()
+  "Find the name of the current asd system."
+  (let ((system-file (sly-asdf-find-system-file default-directory)))
+    (when system-file
+      (file-name-base system-file))))
+
+
+(defun sly-asdf-find-system-file (directory)
+  "Find the first file in the current DIRECTORY or a parent of DIRECTORY that includes a .asd file."
+  (let ((fname (directory-file-name directory)))
+    (or
+     (cl-find-if #'(lambda (file) (string-equal "asd" (file-name-extension file)))
+                 (directory-files directory))
+     (and (file-name-directory fname) 
+          (sly-asdf-find-system-file (file-name-directory fname))))))
 
 
 (defun sly-asdf-determine-asdf-system (filename buffer-package)
