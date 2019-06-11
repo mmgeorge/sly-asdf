@@ -35,6 +35,8 @@
 
 
 (defvar sly-mrepl-shortcut-alist) ;; declared in sly-mrepl
+(defvar sly-asdf-find-system-file-max-depth 10
+  "Max recursive depth for finding an asd system definition from the current directory.")
 (defvar sly-asdf-shortcut-alist
   '(("load-system" . sly-asdf-load-system)
     ("reload-system" . sly-asdf-reload-system)
@@ -250,14 +252,16 @@ in the directory of the current buffer."
       (file-name-base system-file))))
 
 
-(defun sly-asdf-find-system-file (directory)
+(cl-defun sly-asdf-find-system-file (directory &optional (depth sly-asdf-find-system-file-max-depth))
   "Find the first file in the current DIRECTORY or a parent of DIRECTORY that includes a .asd file."
   (let ((fname (directory-file-name directory)))
+    (message "depth: %s" depth)
     (or
      (cl-find-if #'(lambda (file) (string-equal "asd" (file-name-extension file)))
                  (directory-files directory))
-     (and (file-name-directory fname)
-          (sly-asdf-find-system-file (file-name-directory fname))))))
+     (and (> depth 0)
+          (file-name-directory fname)
+          (sly-asdf-find-system-file (file-name-directory fname) (1- depth))))))
 
 
 (defun sly-asdf-determine-asdf-system (filename buffer-package)
