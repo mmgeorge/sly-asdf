@@ -255,7 +255,6 @@ in the directory of the current buffer."
 (cl-defun sly-asdf-find-system-file (directory &optional (depth sly-asdf-find-system-file-max-depth))
   "Find the first file in the current DIRECTORY or a parent of DIRECTORY that includes a .asd file."
   (let ((fname (directory-file-name directory)))
-    (message "depth: %s" depth)
     (or
      (cl-find-if #'(lambda (file) (string-equal "asd" (file-name-extension file)))
                  (directory-files directory))
