@@ -240,9 +240,10 @@ in the directory of the current buffer."
          (prompt (concat prompt (if default-value
                                     (format " (default `%s'): " default-value)
                                   ": "))))
-    (completing-read prompt (sly-asdf-bogus-completion-alist system-names)
-                     nil nil nil
-                     'sly-asdf-system-history default-value)))
+    (let ((history-delete-duplicates t))
+      (completing-read prompt (sly-asdf-bogus-completion-alist system-names)
+                       nil nil nil
+                       'sly-asdf-system-history default-value))))
 
 
 (defun sly-asdf-find-current-system ()
