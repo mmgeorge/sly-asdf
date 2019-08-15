@@ -3,7 +3,7 @@
 ;; Version: 0.1
 ;; URL: https://github.com/mmgeorge/sly-asdf
 ;; Keywords: languages, lisp, sly, asdf
-;; Package-Requires: ((emacs "24.3")(sly "1.0.0-beta2"))
+;; Package-Requires: ((emacs "24.3")(sly "1.0.0-beta2")(popup "0.5.3"))
 ;; Maintainer: Matt George <mmge93@gmail.com>
 ;;
 ;; This file is free software; you can redistribute it and/or modify
@@ -32,7 +32,7 @@
 (require 'sly)
 (require 'cl-lib)
 (require 'grep)
-
+(require 'popup)
 
 (defvar sly-mrepl-shortcut-alist) ;; declared in sly-mrepl
 (defvar sly-asdf-find-system-file-max-depth 10
@@ -54,8 +54,59 @@
   (:license "GPL")
   (:slynk-dependencies slynk-asdf)
   (:on-load
+   (run-with-idle-timer 2.0 nil #'sly-asdf-flymake-init)
    (setq sly-mrepl-shortcut-alist
          (append sly-mrepl-shortcut-alist sly-asdf-shortcut-alist))))
+
+
+;; Flymake support
+(defvar *sly-asdf-last-point* nil)
+
+(defun sly-asdf-flymake (report-fn &rest _args)
+  "Flymake diagnostic function for sly-asdf.  REPORT-FN required callback for flymake."
+  (let ((source (current-buffer)))
+    (sly-asdf-compile-for-flymake
+     (buffer-file-name)
+     (lambda (result)
+       (when result 
+       (funcall report-fn
+                (mapcar (lambda (note) (sly-asdf-note-to-diagnostic note source))
+                        (sly-compilation-result.notes result))))))))
+
+
+(defun sly-asdf-note-to-diagnostic (note source)
+  (let ((message (sly-note.message note))
+        (pos (cadr (sly-location.position (sly-note.location note)))))
+    (save-excursion
+      (goto-char pos)
+      (let ((bounds (or (sly-bounds-of-symbol-at-point)
+                        (sly-bounds-of-sexp-at-point))))
+        (if bounds
+            (cl-destructuring-bind (start . end) bounds
+                (flymake-make-diagnostic source start end :error message))
+          (flymake-make-diagnostic source pos (+ pos 1) :error message))))))
+          
+
+
+(defun sly-asdf-flymake-init ()
+  "Enable flymake support."
+  (interactive)
+  (add-hook 'flymake-diagnostic-functions 'sly-asdf-flymake)
+  (flymake-mode-on)
+  (run-with-idle-timer 0.5 t #'sly-asdf-show-popup))
+
+
+(defun sly-asdf-compile-for-flymake (filename callback)
+  (sly-eval-async `(slynk-asdf:asdf-compile-file ,filename) callback))
+    
+
+(defun sly-asdf-show-popup ()
+  (unless (eq (point) *sly-asdf-last-point*)
+    (setf *sly-asdf-last-point* (point))
+    (let ((diags (flymake-diagnostics (point))))
+      (when diags
+        (popup-tip (flymake-diagnostic-text (car diags)) :point (point))))))
+
 
 
 ;;; Interactive functions

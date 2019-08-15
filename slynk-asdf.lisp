@@ -170,6 +170,21 @@ already knows."
     (format nil "~d file~:p ~:*~[were~;was~:;were~] removed" removed-count)))
 
 
+(defslyfun asdf-compile-file (filename)
+  (let ((pathname (slynk-backend:filename-to-pathname filename))
+        ;; Muffle compilation
+        (*standard-output* (make-string-output-stream))
+        (*error-output* (make-string-output-stream)))
+    (slynk::collect-notes
+     (lambda ()
+       (handler-case
+           (slynk-backend:with-compilation-hooks ()
+             (asdf:compile-file* pathname)
+             t)
+         ((or asdf:compile-error #+asdf3 asdf/lisp-build:compile-file-error)
+           () nil))))))
+
+
 ;;; Internal
 
 (defun asdf-at-least (version)
