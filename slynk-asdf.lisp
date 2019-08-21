@@ -112,6 +112,7 @@ already knows."
    (list-all-systems-known-to-asdf)
    (list-all-systems-in-central-registry)))
 
+
 (defslyfun asdf-system-files (name)
   (let* ((system (asdf:find-system name))
          (files (mapcar #'namestring
@@ -170,7 +171,32 @@ already knows."
     (format nil "~d file~:p ~:*~[were~;was~:;were~] removed" removed-count)))
 
 
-(defslyfun asdf-compile-file (filename)
+(defslyfun compile-file-for-flymake (filename)
+  (flet ((compiler-condition-handler (e)
+           ;; Prevent dropping into the debugger
+           (declare (ignore e))
+           (invoke-restart 'abort)))
+      (let ((pathname (slynk-backend:filename-to-pathname filename))
+            ;; Muffle compilation
+            (*standard-output* (make-string-output-stream))
+            (*error-output* (make-string-output-stream)))
+        (handler-bind ((slynk-backend:compiler-condition #'compiler-condition-handler))
+          (slynk:compile-file-for-emacs filename nil)))))
+
+
+  ;; (slynk::collect-notes
+    ;;  (lambda ()
+    ;;    (handler-case
+    ;;        (slynk-backend:with-compilation-hooks ()
+    ;;          (asdf:compile-file* pathname)
+    ;;          t)
+    ;;      ((or asdf:compile-error #+asdf3 asdf/lisp-build:compile-file-error)
+    ;;        () nil))))))
+
+
+(defslyfun compile-system-for-flymake (name)
+  ;;(let ((*recompile-system* (asdf:find-system name)))
+    ;;(operate-on-system-for-emacs name 'asdf:compile-op)))  
   (let ((pathname (slynk-backend:filename-to-pathname filename))
         ;; Muffle compilation
         (*standard-output* (make-string-output-stream))

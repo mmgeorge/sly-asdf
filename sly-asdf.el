@@ -33,8 +33,11 @@
 (require 'cl-lib)
 (require 'grep)
 (require 'popup)
+(require 'flymake)
 
 (defvar sly-mrepl-shortcut-alist) ;; declared in sly-mrepl
+(defvar sly-asdf-enable-flymake 1
+  "Opt-in to experimental flymake integration.  Currently only tested on SBCL.")
 (defvar sly-asdf-find-system-file-max-depth 10
   "Max recursive depth for finding an asd system definition from the current directory.")
 (defvar sly-asdf-shortcut-alist
@@ -54,58 +57,158 @@
   (:license "GPL")
   (:slynk-dependencies slynk-asdf)
   (:on-load
-   (run-with-idle-timer 2.0 nil #'sly-asdf-flymake-init)
+   (add-hook 'sly-connected-hook #'sly-asdf-flymake-init)
    (setq sly-mrepl-shortcut-alist
          (append sly-mrepl-shortcut-alist sly-asdf-shortcut-alist))))
 
 
 ;; Flymake support
-(defvar *sly-asdf-last-point* nil)
 
-(defun sly-asdf-flymake (report-fn &rest _args)
+(defvar *sly-asdf-lisp-extensions* (list "lisp")
+  "File extensions to look for when finding open Lisp files.")
+(defvar *sly-asdf--last-point* nil)
+(defvar *sly-asdf--flymake-backend-state* nil)
+(defvar sly-asdf--after-oos-hook nil)
+
+(defun sly-asdf-flymake-init ()
+  "Enable flymake support."
+  ;; MG: Some hacking was needed to get this to work. The main
+  ;; issue here being that flymake largely seems written with the assumption
+  ;; of running and highlighting errors exclusively in the `current-buffer`.
+  ;; Error state is buffer-local despite the error reporting format taking a buffer
+  ;; However, in our case, we would like flymake to be system aware, as well
+  ;; as to continue to report errors if, for instance, we are in another buffer,
+  ;; (e.g. the REPL)
+  (when sly-asdf-enable-flymake
+    (flymake-mode 1)
+    (setf *sly-asdf--flymake-backend-state* (make-hash-table))
+    ;; Hack to supporting highlighting arbitary buffers
+    (advice-add 'flymake--highlight-line :around 'sly-asdf--flymake-highlight-around-hook)
+    ;; Run the backend
+    (sly-asdf--run-flymake-backend)
+    (add-hook 'sly-asdf--after-oos-hook 'sly-asdf--run-flymake-backend nil nil)
+    (add-hook 'after-change-functions 'sly-asdf--after-change-function nil nil)
+    (add-hook 'after-save-hook 'sly-asdf--after-save-function nil nil)
+    (add-hook 'sly-event-hooks 'sly-asdf--before-event-function nil nil)
+    (run-with-idle-timer 0.5 t #'sly-asdf-show-popup)))
+
+
+(defun sly-asdf--after-change-function (_start _stop _len)
+  "Start syntax check for current buffer if it isn't already running.")
+;; MG: TODO - For this, we need to send unsaved buffers for compilation
+;;(when (sly-asdf--lisp-buffer-p (current-buffer))
+;;(sly-asdf--run-flymake-backend)))
+
+
+(defun sly-asdf--before-event-function (&rest args)
+  "Fired before each sly event.  Takes an ARGS, the first value of which is the operation."
+  (cl-destructuring-bind ((op &rest)) args
+    (when (eq op :channel-send)
+      ;;We may have evaluated some expression that may change
+      ;; the result of compilation, e.g., loading some other system
+      (sly-asdf--run-flymake-backend)))
+  nil)
+
+
+(defun sly-asdf--after-save-function ()
+  "Start syntax check for current buffer if it isn't already running."
+  (sly-asdf--run-flymake-backend))
+
+
+
+(defun sly-asdf--run-flymake-backend ()
+  "Flymake backend."
+  ;;Override backend-state
+  (let ((flymake--backend-state *sly-asdf--flymake-backend-state*))
+    (flymake--with-backend-state 'sly-asdf-flymake state
+      (let ((run-token (cl-gensym "backend-token")))
+        (setf (flymake--backend-state-running state) run-token
+              (flymake--backend-state-disabled state) nil
+              (flymake--backend-state-diags state) nil
+              (flymake--backend-state-reported-p state) nil)
+        (funcall 'sly-asdf-flymake
+                 (lambda (&rest args)
+                   ;;MG: Override backend-state, lexical scoping doesn't work here -> bc async?
+                   (let ((flymake--backend-state *sly-asdf--flymake-backend-state*))
+                     (sly-asdf--remove-highlight-all-buffers)
+                     (apply #'flymake--handle-report 'sly-asdf-flymake run-token args))))))))
+
+
+(defun sly-asdf--remove-highlight (buffer)
+  "Remove flymake overlays from target BUFFER."
+  (save-excursion
+    (with-current-buffer buffer
+      (flymake-delete-own-overlays))))
+
+
+(defun sly-asdf--remove-highlight-all-buffers ()
+  "Remove flymake overlays from all Lisp buffers."
+  (cl-mapcar 'sly-asdf--remove-highlight (sly-asdf--current-lisp-buffers)))
+
+
+(cl-defun sly-asdf-flymake (report-fn &rest _args)
   "Flymake diagnostic function for sly-asdf.  REPORT-FN required callback for flymake."
-  (let ((source (current-buffer)))
-    (sly-asdf-compile-for-flymake
-     (buffer-file-name)
-     (lambda (result)
-       (when result 
-       (funcall report-fn
-                (mapcar (lambda (note) (sly-asdf-note-to-diagnostic note source))
-                        (sly-compilation-result.notes result))))))))
+  (cl-flet ((compile-buffer-for-flycheck (buffer)
+                                         (sly-asdf-compile-for-flymake
+                                          (buffer-file-name buffer)
+                                          (lambda (result)
+                                            (if result
+                                                (funcall report-fn
+                                                         (mapcar (lambda (note)
+                                                                   (sly-asdf-note-to-diagnostic note buffer))
+                                                                 (sly-compilation-result.notes result)))
+                                              (funcall report-fn nil))))))
+    (mapcar #'compile-buffer-for-flycheck (sly-asdf--current-lisp-buffers))))
 
 
 (defun sly-asdf-note-to-diagnostic (note source)
+  "Create a diagnostic for the given sly NOTE found in the buffer SOURCE."
   (let ((message (sly-note.message note))
         (pos (cadr (sly-location.position (sly-note.location note)))))
-    (save-excursion
+    (with-current-buffer source
+      (save-excursion
       (goto-char pos)
       (let ((bounds (or (sly-bounds-of-symbol-at-point)
                         (sly-bounds-of-sexp-at-point))))
         (if bounds
             (cl-destructuring-bind (start . end) bounds
-                (flymake-make-diagnostic source start end :error message))
-          (flymake-make-diagnostic source pos (+ pos 1) :error message))))))
-          
+              (flymake-make-diagnostic source start end :error message))
+          (flymake-make-diagnostic source pos (+ pos 1) :error message)))))))
 
 
-(defun sly-asdf-flymake-init ()
-  "Enable flymake support."
-  (interactive)
-  (add-hook 'flymake-diagnostic-functions 'sly-asdf-flymake)
-  (flymake-mode-on)
-  (run-with-idle-timer 0.5 t #'sly-asdf-show-popup))
+(defun sly-asdf--flymake-highlight-around-hook (fun &rest args)
+  "Hook to apply around flymake-highlight.
+FUN is the original function and ARGS is a list containing
+the diagnostic to highlight.  Needed because flymake-highlight does
+not pass the diagnostic's buffer to `make-overlay`."
+  (let ((diagnostic (car args)))
+    (with-current-buffer (flymake--diag-buffer diagnostic)
+      (apply fun args))))
+
+
+(defun sly-asdf--lisp-buffer-p (buffer)
+  "Check whether BUFFER refers to a Lisp buffer."
+  (member (file-name-extension (buffer-name buffer)) *sly-asdf-lisp-extensions*))
+
+
+(defun sly-asdf--current-lisp-buffers ()
+  "Traverses the current `buffer-list`, returning those buffers with a .lisp extension."
+  (cl-remove-if-not #'sly-asdf--lisp-buffer-p (buffer-list)))
 
 
 (defun sly-asdf-compile-for-flymake (filename callback)
-  (sly-eval-async `(slynk-asdf:asdf-compile-file ,filename) callback))
-    
+  "Compile FILENAME for Emacs, calling CALLBACK with the result of compilation."
+  (sly-eval-async `(slynk-asdf:compile-file-for-flymake ,filename) callback))
+
 
 (defun sly-asdf-show-popup ()
-  (unless (eq (point) *sly-asdf-last-point*)
-    (setf *sly-asdf-last-point* (point))
-    (let ((diags (flymake-diagnostics (point))))
-      (when diags
-        (popup-tip (flymake-diagnostic-text (car diags)) :point (point))))))
+  "Display a popup containing the diagnostic message at the current point."
+  (let ((point (point)))
+    (unless (equal point *sly-asdf--last-point*)
+      (setf *sly-asdf--last-point* point)
+      (let ((diags (flymake-diagnostics point)))
+        (when diags
+          (popup-tip (flymake-diagnostic-text (car diags)) :point point))))))
 
 
 
@@ -130,7 +233,8 @@ buffer's working directory"
   (sly-eval-async
       `(slynk-asdf:reload-system ,system)
     #'(lambda (result)
-        (sly-compilation-finished result (current-buffer)))))
+        (sly-compilation-finished result (current-buffer))
+        (run-hooks 'sly-asdf--after-oos-hook))))
 
 
 (defun sly-asdf-save-system (system)
@@ -230,8 +334,8 @@ DELIMITED is optional.  Includes the base system and all other systems it depend
   "Delete FASLs produced by compiling a system with NAME."
   (interactive (list (sly-asdf-read-system-name)))
   (sly-eval-async
-   `(slynk-asdf:delete-system-fasls ,name)
-   'message))
+      `(slynk-asdf:delete-system-fasls ,name)
+    'message))
 
 
 (defun sly-asdf-who-depends-on (sys-name)
@@ -287,7 +391,7 @@ in the directory of the current buffer."
          (prompt (or prompt "System"))
          (system-names (sly-eval `(slynk-asdf:list-asdf-systems)))
          (default-value
-           (or default-value (sly-asdf-find-current-system) (first sly-asdf-system-history)))
+           (or default-value (sly-asdf-find-current-system) (car sly-asdf-system-history)))
          (prompt (concat prompt (if default-value
                                     (format " (default `%s'): " default-value)
                                   ": "))))
@@ -336,7 +440,8 @@ in the directory of the current buffer."
   (sly-eval-async
       `(slynk-asdf:operate-on-system-for-emacs ,system ',operation ,@keyword-args)
     #'(lambda (result)
-        (sly-compilation-finished result (current-buffer)))))
+        (sly-compilation-finished result (current-buffer))
+        (run-hooks 'sly-asdf--after-oos-hook))))
 
 
 ;;;###autoload
