@@ -90,7 +90,46 @@
     (add-hook 'after-change-functions 'sly-asdf--after-change-function nil nil)
     (add-hook 'after-save-hook 'sly-asdf--after-save-function nil nil)
     (add-hook 'sly-event-hooks 'sly-asdf--before-event-function nil nil)
+    (run-with-idle-timer 0.5 t #'sly-asdf-show-popup)
+    ;; MG: We cannot use `buffer-list-update-hook` as it is run before the buffer's underlying
+    ;; file is visited (buffer-file-name) return nil. Use `post-command-hook` instead?.
+    (add-hook 'window-configuration-change-hook 'sly-asdf--flymake-buffer-list-update-hook)
     (run-with-idle-timer 0.5 t #'sly-asdf-show-popup)))
+
+
+(defvar sly-asdf--buffer-to-system (make-hash-table))
+(defvar sly-asdf--system-to-buffers (make-hash-table))
+(defvar sly-asdf--last-lisp-buffers nil)
+
+(defun sly-asdf--flymake-buffer-list-update-hook ()
+  (let* ((current-buffers (sly-asdf--current-lisp-buffers))
+         (new-buffers (cl-set-difference current-buffers sly-asdf--last-lisp-buffers))
+         (removed-buffers (cl-set-difference sly-asdf--last-lisp-buffers current-buffers)))
+    ;; Update a map of buffers and their associated systems
+    (setf sly-asdf--last-lisp-buffers current-buffers)
+    ;; For each new buffer, find it's corresponding system. Lisp buffers that do not
+    ;; correspond to a system are marked as belonging to "orphan"
+    (cl-loop for buffer in new-buffers
+             for name = (buffer-name buffer)
+             for hash-value = (gethash name sly-asdf--buffer-to-system)
+             unless hash-value do
+             (setf (gethash name sly-asdf--buffer-to-system)
+                   (or (sly-asdf-find-current-system buffer) "orphan")))
+    (cl-loop for buffer in removed-buffers
+             do (remhash buffer sly-asdf--buffer-to-system))
+    (setf sly-asdf--system-to-buffers
+          (sly-asdf--buffers-by-system))))
+
+
+(defun sly-asdf--buffers-by-system ()
+  "Get a plist of current asdf systems and their associated buffers.  "
+  (interactive)
+  (let ((buffers-by-system (make-hash-table :test #'equal)))
+    (cl-loop for buffer being the hash-keys of sly-asdf--buffer-to-system
+             using (hash-value system) do 
+             (push buffer (gethash system buffers-by-system)))
+    (message "%s" buffers-by-system)
+    buffers-by-system))
 
 
 (defun sly-asdf--after-change-function (_start _stop _len)
@@ -115,7 +154,6 @@
   (sly-asdf--run-flymake-backend))
 
 
-
 (defun sly-asdf--run-flymake-backend ()
   "Flymake backend."
   ;;Override backend-state
@@ -130,8 +168,149 @@
                  (lambda (&rest args)
                    ;;MG: Override backend-state, lexical scoping doesn't work here -> bc async?
                    (let ((flymake--backend-state *sly-asdf--flymake-backend-state*))
+                     (message "remove hl")
                      (sly-asdf--remove-highlight-all-buffers)
-                     (apply #'flymake--handle-report 'sly-asdf-flymake run-token args))))))))
+                     (message "handle report")
+                     (apply #'sly-asdf-flymake--handle-report 'sly-asdf-flymake run-token args)
+                     )
+                   ;; MG: Override backend-state, lexical scoping doesn't work here -> bc async?
+                   ))))))
+
+
+(cl-defun sly-asdf-flymake--handle-report (backend token report-action
+                                          &key explanation force
+                                          &allow-other-keys)
+  "Handle reports from BACKEND identified by TOKEN.
+BACKEND, REPORT-ACTION and EXPLANATION, and FORCE conform to the calling
+convention described in `flymake-diagnostic-functions' (which
+see). Optional FORCE says to handle a report even if TOKEN was
+not expected."
+  (let* ((state (gethash backend flymake--backend-state))
+         (first-report (not (flymake--backend-state-reported-p state))))
+    (setf (flymake--backend-state-reported-p state) t)
+    (let (expected-token
+          new-diags)
+      (cond
+       ((null state)
+        (flymake-error
+         "Unexpected report from unknown backend %s" backend))
+       ((flymake--backend-state-disabled state)
+        (flymake-error
+         "Unexpected report from disabled backend %s" backend))
+       ((progn
+          (setq expected-token (flymake--backend-state-running state))
+          (null expected-token))
+        ;; should never happen
+        (flymake-error "Unexpected report from stopped backend %s" backend))
+       ((not (or (eq expected-token token)
+                 force))
+        (flymake-error "Obsolete report from backend %s with explanation %s"
+                       backend explanation))
+       ((eq :panic report-action)
+        (flymake--disable-backend backend explanation))
+       ((not (listp report-action))
+        (flymake--disable-backend backend
+                                  (format "Unknown action %S" report-action))
+        (flymake-error "Expected report, but got unknown key %s" report-action))
+       (t
+        (setq new-diags report-action)
+        (message "new diags: %s" new-diags)
+        (save-restriction
+          (widen)
+          ;; only delete overlays if this is the first report
+          ;; (when first-report
+          ;;   (flymake-delete-own-overlays
+          ;;    (lambda (ov)
+          ;;      (eq backend
+          ;;          (flymake--diag-backend
+          ;;           (overlay-get ov 'flymake-diagnostic)))))
+
+          ;;   )
+          (mapc (lambda (diag)
+                  (flymake--highlight-line diag)
+                  (setf (flymake--diag-backend diag) backend))
+                new-diags)
+          (setf (flymake--backend-state-diags state)
+                (append new-diags (flymake--backend-state-diags state)))
+          (when flymake-check-start-time
+            (flymake-log :debug "backend %s reported %d diagnostics in %.2f second(s)"
+                         backend
+                         (length new-diags)
+                         (- (float-time) flymake-check-start-time)))
+          (when (and (get-buffer (flymake--diagnostics-buffer-name))
+                     (get-buffer-window (flymake--diagnostics-buffer-name))
+                     (null (cl-set-difference (flymake-running-backends)
+                                              (flymake-reporting-backends))))
+            (flymake-show-diagnostics-buffer))))))))
+
+
+
+(cl-defun sly-asdf-flymake (report-cb &rest _args)
+  "Flymake diagnostic function for sly-asdf.  REPORT-FN required callback for flymake."
+  (let ((systems (hash-table-keys (sly-asdf--buffers-by-system))))
+    ;; Compile each system for which there exists a corresponding buffer
+    (cl-loop for system in systems
+             if (string-equal system "orphan") do
+             ;; Orphaned buffers are compiled separately
+             (mapc #'(lambda (buf) (sly-asdf--compile-buffer-for-flymake buf report-cb))
+                     (gethash systems system))
+             else do
+             (sly-asdf--compile-system-for-flymake system report-cb))))
+
+
+(defun sly-asdf--compile-buffer-for-flymake (buffer report-cb)
+  (sly-asdf--compile-for-flymake
+   (buffer-file-name buffer)
+   (create-flymake-report-fn report-cb (list buffer))))
+
+
+(defun sly-asdf--compile-system-for-flymake (system report-cb)
+  (sly-eval-async `(slynk-asdf:compile-system-for-flymake ,system)
+    (create-flymake-report-fn report-cb (gethash system sly-asdf--system-to-buffers))))
+
+
+(defun create-flymake-report-fn (report-cb buffers)
+  (cl-flet ((remove-nulls (list) (remove-if-not #'identity list)))
+    (lambda (result)
+      (sly-asdf--remove-highlight-from-buffers buffers)
+      (if result
+          (funcall report-cb
+                   (remove-nulls
+                    (mapcar (lambda (note)
+                              (sly-asdf-note-to-diagnostic note))
+                            (sly-compilation-result.notes result)))
+                   :force t)
+        (funcall report-cb nil :force t)))))
+
+
+(defun sly-asdf-note-to-diagnostic (note)
+  "Create a diagnostic for the given sly NOTE found in the buffer SOURCE."
+  (message "%s" (sly-note.location note))
+  (let* ((message (sly-note.message note))
+         (location (sly-note.location note))
+         (severity (sly-note.severity note)))
+    ;; Location may be an (:error) w/o a buffer, in which sly-location.buffer
+    ;; returns a string (the error message)
+    (if (and location (listp (sly-location.buffer location))) 
+        (progn 
+          (message "location!: %s buf: %s " location (sly-location.buffer location))
+        (let ((buffer (get-file-buffer (cadr (sly-location.buffer location))))
+              (pos (cadr (sly-location.position location ))))
+          (message "buf2!: %s " buffer)
+          (when buffer 
+            (with-current-buffer buffer
+            (save-excursion
+              (goto-char pos)
+              (let ((bounds (or (sly-bounds-of-symbol-at-point)
+                                (sly-bounds-of-sexp-at-point))))
+                (if bounds
+                    (cl-destructuring-bind (start . end) bounds
+                      (flymake-make-diagnostic buffer start end severity message))
+                  (flymake-make-diagnostic buffer pos (+ pos 1) severity message))))))))
+      (progn
+        (message "%s" (car (sly-asdf--current-lisp-buffers)) )
+        (flymake-make-diagnostic (car (sly-asdf--current-lisp-buffers)) 1
+                                 (buffer-size (car (sly-asdf--current-lisp-buffers))) severity message)))))
 
 
 (defun sly-asdf--remove-highlight (buffer)
@@ -146,34 +325,39 @@
   (cl-mapcar 'sly-asdf--remove-highlight (sly-asdf--current-lisp-buffers)))
 
 
-(cl-defun sly-asdf-flymake (report-fn &rest _args)
-  "Flymake diagnostic function for sly-asdf.  REPORT-FN required callback for flymake."
-  (cl-flet ((compile-buffer-for-flycheck (buffer)
-                                         (sly-asdf-compile-for-flymake
-                                          (buffer-file-name buffer)
-                                          (lambda (result)
-                                            (if result
-                                                (funcall report-fn
-                                                         (mapcar (lambda (note)
-                                                                   (sly-asdf-note-to-diagnostic note buffer))
-                                                                 (sly-compilation-result.notes result)))
-                                              (funcall report-fn nil))))))
-    (mapcar #'compile-buffer-for-flycheck (sly-asdf--current-lisp-buffers))))
+;; (cl-defun sly-asdf-flymake (report-fn &rest _args)
+;;   "Flymake diagnostic function for sly-asdf.  REPORT-FN required callback for flymake."
+;;   (cl-flet ((compile-buffer-for-flycheck (buffer)
+;;                                          (sly-asdf-compile-for-flymake
+;;                                           (buffer-file-name buffer)
+;;                                           (lambda (result)
+;;                                             (if result
+;;                                                 (funcall report-fn
+;;                                                          (mapcar (lambda (note)
+;;                                                                    (sly-asdf-note-to-diagnostic note buffer))
+;;                                                                  (sly-compilation-result.notes result)))
+;;                                               (funcall report-fn nil))))))
+;;     (mapcar #'compile-buffer-for-flycheck (sly-asdf--current-lisp-buffers))))
 
 
-(defun sly-asdf-note-to-diagnostic (note source)
-  "Create a diagnostic for the given sly NOTE found in the buffer SOURCE."
-  (let ((message (sly-note.message note))
-        (pos (cadr (sly-location.position (sly-note.location note)))))
-    (with-current-buffer source
-      (save-excursion
-      (goto-char pos)
-      (let ((bounds (or (sly-bounds-of-symbol-at-point)
-                        (sly-bounds-of-sexp-at-point))))
-        (if bounds
-            (cl-destructuring-bind (start . end) bounds
-              (flymake-make-diagnostic source start end :error message))
-          (flymake-make-diagnostic source pos (+ pos 1) :error message)))))))
+;; (defun sly-asdf-note-to-diagnostic (note source)
+;;   "Create a diagnostic for the given sly NOTE found in the buffer SOURCE."
+;;   (let ((message (sly-note.message note))
+;;         (pos (cadr (sly-location.position (sly-note.location note)))))
+;;     (with-current-buffer source
+;;       (save-excursion
+;;       (goto-char pos)
+;;       (let ((bounds (or (sly-bounds-of-symbol-at-point)
+;;                         (sly-bounds-of-sexp-at-point))))
+;;         (if bounds
+;;             (cl-destructuring-bind (start . end) bounds
+;;               (flymake-make-diagnostic source start end :error message))
+;;           (flymake-make-diagnostic source pos (+ pos 1) :error message)))))))
+
+
+(defun sly-asdf--remove-highlight-from-buffers (buffers)
+  "Remove flymake overlays from all Lisp buffers."
+  (cl-mapcar 'sly-asdf--remove-highlight buffers))
 
 
 (defun sly-asdf--flymake-highlight-around-hook (fun &rest args)
@@ -183,6 +367,7 @@ the diagnostic to highlight.  Needed because flymake-highlight does
 not pass the diagnostic's buffer to `make-overlay`."
   (let ((diagnostic (car args)))
     (with-current-buffer (flymake--diag-buffer diagnostic)
+      (message "buf %s" (current-buffer))
       (apply fun args))))
 
 
@@ -196,7 +381,7 @@ not pass the diagnostic's buffer to `make-overlay`."
   (cl-remove-if-not #'sly-asdf--lisp-buffer-p (buffer-list)))
 
 
-(defun sly-asdf-compile-for-flymake (filename callback)
+(defun sly-asdf--compile-for-flymake (filename callback)
   "Compile FILENAME for Emacs, calling CALLBACK with the result of compilation."
   (sly-eval-async `(slynk-asdf:compile-file-for-flymake ,filename) callback))
 
@@ -209,7 +394,6 @@ not pass the diagnostic's buffer to `make-overlay`."
       (let ((diags (flymake-diagnostics point)))
         (when diags
           (popup-tip (flymake-diagnostic-text (car diags)) :point point))))))
-
 
 
 ;;; Interactive functions
@@ -236,6 +420,12 @@ buffer's working directory"
         (sly-compilation-finished result (current-buffer))
         (run-hooks 'sly-asdf--after-oos-hook))))
 
+(defun sly-asdf-compile-system (&optional system)
+  "Compile and load an ASDF SYSTEM.
+Default system name is taken from first file matching *.asd in current
+buffer's working directory"
+  (interactive (list (sly-asdf-read-system-name)))
+  (sly-asdf-oos system 'compile-op))
 
 (defun sly-asdf-save-system (system)
   "Save files belonging to an ASDF SYSTEM."
@@ -401,11 +591,14 @@ in the directory of the current buffer."
                        'sly-asdf-system-history default-value))))
 
 
-(defun sly-asdf-find-current-system ()
+(cl-defun sly-asdf-find-current-system (&optional (buffer (car (sly-asdf--current-lisp-buffers))))
   "Find the name of the current asd system."
-  (let ((system-file (sly-asdf-find-system-file default-directory)))
-    (when system-file
-      (file-name-base system-file))))
+  (when buffer
+    (let* ((buffer-file-name (buffer-file-name buffer ))
+           (directory (file-name-directory buffer-file-name))
+           (system-file (sly-asdf-find-system-file directory)))
+      (when system-file
+        (file-name-base system-file)))))
 
 
 (cl-defun sly-asdf-find-system-file (directory &optional (depth sly-asdf-find-system-file-max-depth))

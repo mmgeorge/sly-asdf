@@ -1,3 +1,4 @@
+
 ;;; slynk-asdf.lisp -- ASDF support
 ;;; Ported from swank-asdf <https://github.com/slime/slime/blob/master/contrib/swank-asdf.lisp>
 ;; Authors: Daniel Barlow <dan@telent.net>
@@ -9,8 +10,7 @@
 
 (defpackage :slynk-asdf
   (:use :cl :slynk-api :slynk-backend)
-  (:import-from :slynk)
-  (:export))
+  (:import-from :slynk))
 
 (in-package :slynk-asdf)
 
@@ -171,17 +171,17 @@ already knows."
     (format nil "~d file~:p ~:*~[were~;was~:;were~] removed" removed-count)))
 
 
-(defslyfun compile-file-for-flymake (filename)
-  (flet ((compiler-condition-handler (e)
-           ;; Prevent dropping into the debugger
-           (declare (ignore e))
-           (invoke-restart 'abort)))
-      (let ((pathname (slynk-backend:filename-to-pathname filename))
-            ;; Muffle compilation
-            (*standard-output* (make-string-output-stream))
-            (*error-output* (make-string-output-stream)))
-        (handler-bind ((slynk-backend:compiler-condition #'compiler-condition-handler))
-          (slynk:compile-file-for-emacs filename nil)))))
+;; (defslyfun compile-file-for-flymake (filename)
+;;   (flet ((compiler-condition-handler (e)
+;;            ;; Prevent dropping into the debugger
+;;            (declare (ignore e))
+;;            (invoke-restart 'abort)))
+;;       (let ((pathname (slynk-backend:filename-to-pathname filename))
+;;             ;; Muffle compilation
+;;             (*standard-output* (make-string-output-stream))
+;;             (*error-output* (make-string-output-stream)))
+;;         (handler-bind ((slynk-backend:compiler-condition #'compiler-condition-handler))
+;;           (slynk:compile-file-for-emacs filename nil)))))
 
 
   ;; (slynk::collect-notes
@@ -194,21 +194,122 @@ already knows."
     ;;        () nil))))))
 
 
-(defslyfun compile-system-for-flymake (name)
-  ;;(let ((*recompile-system* (asdf:find-system name)))
-    ;;(operate-on-system-for-emacs name 'asdf:compile-op)))  
-  (let ((pathname (slynk-backend:filename-to-pathname filename))
+;; (defslyfun compile-system-for-flymake (name)
+;;   ;;(let ((*recompile-system* (asdf:find-system name)))
+;;     ;;(operate-on-system-for-emacs name 'asdf:compile-op)))  
+;;   (let ((pathname (slynk-backend:filename-to-pathname filename))
+;;         ;; Muffle compilation
+;;         (*standard-output* (make-string-output-stream))
+;;         (*error-output* (make-string-output-stream)))
+;;     (slynk::collect-notes
+;;      (lambda ()
+;;        (handler-case
+;;            (slynk-backend:with-compilation-hooks ()
+;;              (asdf:compile-file* pathname)
+;;              t)
+;;          ((or asdf:compile-error #+asdf3 asdf/lisp-build:compile-file-error)
+;;            () nil))))))
+
+(defmacro while-collecting-notes ((&key interactive) &body body)
+  `(collect-notes (lambda () ,@body) ,interactive))
+
+
+(defun collect-notes (function interactive)
+  "Includes additional asdf specific logic from `slynk::collect-notes`"
+  (let ((notes '()))
+    (multiple-value-bind (result seconds)
+        (handler-bind ((slynk::compiler-condition
+                         (lambda (c)
+                           (let ((note (make-compiler-note c)))
+                             (when note 
+                               (push note notes)))
+                           (unless interactive
+                             (invoke-restart 'abort)))))
+            (slynk::measure-time-interval
+             (lambda ()
+               ;; To report location of error-signaling toplevel forms
+               ;; for errors in EVAL-WHEN or during macroexpansion.
+               (restart-case (multiple-value-list (funcall function))
+                 (abort () :report "Abort compilation." (list nil))))))
+          (destructuring-bind (successp &optional loadp faslfile) result
+            (let ((faslfile (etypecase faslfile
+                              (null nil)
+                              (pathname (pathname-to-filename faslfile)))))
+              (slynk::make-compilation-result :notes (reverse notes)
+                                              :duration seconds
+                                              :successp (if successp t)
+                                              :loadp (if loadp t)
+                                              :faslfile faslfile))))))
+
+
+(defvar *asdf-condition-types*
+  '(asdf:load-system-definition-error
+    asdf:system-definition-error))
+
+
+(defun asdf-condition-p (condition)
+  (member (type-of (original-condition condition)) *asdf-condition-types*))
+
+
+(defun make-compiler-note (condition)
+  "Make a compiler note data structure from a compiler-condition."
+  ;;(declare (type compiler-condition condition))
+  (if (asdf-condition-p condition)
+      (make-asdf-note condition)
+      (unless (member (severity condition) '(:style-warning :redefinition))
+        (list* :message (message condition)
+               :severity (severity condition)
+               :location (location condition)
+               :references (references condition)
+               :type (type-of (original-condition condition))
+               (let ((s (source-context condition)))
+                 (if s (list :source-context s)))))))
+
+
+(defun make-asdf-note (condition)
+  (let ((message (format nil "~A" (asdf/find-system:error-condition (original-condition condition)))))
+    ;; Hack for now. Clobber asdf messages in deps. Instead we should extract the
+    ;; file buffer and delegate to calling code to clobber irrelevant erros
+    (unless (search "/quicklisp" message)
+      (list* :message message
+             :severity :error
+             :location nil ;;(parse-condition-location
+             ;;(asdf/find-system:error-condition (original-condition condition)))
+             :references nil
+             :type (type-of (original-condition condition))))))
+
+
+(defun parse-condition-location (condition)
+  "Inspect the class of a given CONDITION. If it includes a slot with the name LOCATION
+return it if it is of the form (:file FILENAME :pos NUMBER)"
+  (loop for slot in (slynk-mop:class-direct-slots (class-of condition))
+     for name = (slynk-mop:slot-definition-name slot)
+     when (string-equal name "LOCATION") :do
+       (return-from parse-condition-location
+         (slynk-mop:slot-value-using-class  (class-of condition) condition slot))))
+
+
+(defslyfun compile-file-for-flymake (filename)
+  (let (;;(pathname (slynk-backend:filename-to-pathname filename))
         ;; Muffle compilation
-        (*standard-output* (make-string-output-stream))
-        (*error-output* (make-string-output-stream)))
-    (slynk::collect-notes
-     (lambda ()
-       (handler-case
-           (slynk-backend:with-compilation-hooks ()
-             (asdf:compile-file* pathname)
-             t)
-         ((or asdf:compile-error #+asdf3 asdf/lisp-build:compile-file-error)
-           () nil))))))
+        ;(*standard-output* (make-string-output-stream))
+        ;(*error-output* (make-string-output-stream))
+        )
+    ;(handler-bind ((slynk-backend:compiler-condition #'compiler-condition-handler))
+      (slynk:compile-file-for-emacs filename nil)))
+
+
+(defslyfun compile-system-for-flymake (name)
+  ;; Muffle compilation
+  (format t "compile system")
+  (let (;(*standard-output* (make-string-output-stream))
+        ;(*error-output* (make-string-output-stream))
+        (asdf/driver:*output-translation-function*
+          (lambda (x)
+            (format t "Compile it! ~A~%" x)
+            x)))
+     (while-collecting-notes (:interactive nil)
+       (operate-on-system-for-emacs name 'compile-op :force t))))
 
 
 ;;; Internal
