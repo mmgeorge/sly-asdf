@@ -236,7 +236,7 @@ in the directory of the current buffer."
          (prompt (or prompt "System"))
          (system-names (sly-eval `(slynk-asdf:list-asdf-systems)))
          (default-value
-           (or default-value (sly-asdf-find-current-system) (first sly-asdf-system-history)))
+           (or default-value (sly-asdf-find-current-system) (car sly-asdf-system-history)))
          (prompt (concat prompt (if default-value
                                     (format " (default `%s'): " default-value)
                                   ": "))))
