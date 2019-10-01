@@ -56,7 +56,9 @@
   (:license "GPL")
   (:slynk-dependencies slynk-asdf)
   (:on-load
-   (add-hook 'sly-connected-hook #'sly-asdf-flymake)
+   (add-hook 'sly-connected-hook
+             ;; MG: Investigate race, due to when ASDF loads?
+             (lambda () (run-with-idle-timer .5 nil #'sly-asdf-flymake)))
    (setq sly-mrepl-shortcut-alist
          (append sly-mrepl-shortcut-alist sly-asdf-shortcut-alist))))
 

@@ -52,6 +52,7 @@
 ;;; Callable by RPC
 
 (defslyfun who-depends-on (system)
+  (format t "who-depends-on" )
   (flet ((system-dependencies (op system)
            (mapcar (lambda (dep)
                      (asdf::coerce-name (if (consp dep) (second dep) dep)))
@@ -171,45 +172,6 @@ already knows."
     (format nil "~d file~:p ~:*~[were~;was~:;were~] removed" removed-count)))
 
 
-;; (defslyfun compile-file-for-flymake (filename)
-;;   (flet ((compiler-condition-handler (e)
-;;            ;; Prevent dropping into the debugger
-;;            (declare (ignore e))
-;;            (invoke-restart 'abort)))
-;;       (let ((pathname (slynk-backend:filename-to-pathname filename))
-;;             ;; Muffle compilation
-;;             (*standard-output* (make-string-output-stream))
-;;             (*error-output* (make-string-output-stream)))
-;;         (handler-bind ((slynk-backend:compiler-condition #'compiler-condition-handler))
-;;           (slynk:compile-file-for-emacs filename nil)))))
-
-
-  ;; (slynk::collect-notes
-    ;;  (lambda ()
-    ;;    (handler-case
-    ;;        (slynk-backend:with-compilation-hooks ()
-    ;;          (asdf:compile-file* pathname)
-    ;;          t)
-    ;;      ((or asdf:compile-error #+asdf3 asdf/lisp-build:compile-file-error)
-    ;;        () nil))))))
-
-
-;; (defslyfun compile-system-for-flymake (name)
-;;   ;;(let ((*recompile-system* (asdf:find-system name)))
-;;     ;;(operate-on-system-for-emacs name 'asdf:compile-op)))  
-;;   (let ((pathname (slynk-backend:filename-to-pathname filename))
-;;         ;; Muffle compilation
-;;         (*standard-output* (make-string-output-stream))
-;;         (*error-output* (make-string-output-stream)))
-;;     (slynk::collect-notes
-;;      (lambda ()
-;;        (handler-case
-;;            (slynk-backend:with-compilation-hooks ()
-;;              (asdf:compile-file* pathname)
-;;              t)
-;;          ((or asdf:compile-error #+asdf3 asdf/lisp-build:compile-file-error)
-;;            () nil))))))
-
 (defmacro while-collecting-notes ((&key interactive) &body body)
   `(collect-notes (lambda () ,@body) ,interactive))
 
@@ -243,19 +205,23 @@ already knows."
 
 
 (defvar *asdf-condition-types*
-  '(asdf:load-system-definition-error
+  '(;; System definition related
+    asdf/parse-defsystem:bad-system-name
+    asdf:load-system-definition-error
+    asdf/plan::dependency-not-done
     asdf:system-definition-error))
 
 
 (defun asdf-condition-p (condition)
-  (member (type-of (original-condition condition)) *asdf-condition-types*))
+  (member (type-of condition) *asdf-condition-types*))
 
 
 (defun make-compiler-note (condition)
   "Make a compiler note data structure from a compiler-condition."
   ;;(declare (type compiler-condition condition))
-  (if (asdf-condition-p condition)
-      (make-asdf-note condition)
+  (format t "make note")
+  (if (asdf-condition-p (original-condition condition))
+      (make-asdf-note (original-condition condition))
       (unless (member (severity condition) '(:style-warning :redefinition))
         (list* :message (message condition)
                :severity (severity condition)
@@ -267,16 +233,24 @@ already knows."
 
 
 (defun make-asdf-note (condition)
-  (let ((message (format nil "~A" (asdf/find-system:error-condition (original-condition condition)))))
-    ;; Hack for now. Clobber asdf messages in deps. Instead we should extract the
-    ;; file buffer and delegate to calling code to clobber irrelevant erros
-    (unless (search "/quicklisp" message)
-      (list* :message message
-             :severity :error
-             :location nil ;;(parse-condition-location
-             ;;(asdf/find-system:error-condition (original-condition condition)))
-             :references nil
-             :type (type-of (original-condition condition))))))
+  (etypecase condition
+    ((or asdf:load-system-definition-error
+         asdf:system-definition-error)
+     (let ((message (format nil "~A" (asdf/find-system:error-condition condition))))
+       ;; Hack for now. Clobber asdf messages in deps. Instead we should extract the
+       ;; file buffer and delegate to calling code to clobber irrelevant errors
+       (unless (search "/quicklisp" message)
+         (list* :message message
+                :severity :error
+                :location nil ;;(parse-condition-location
+                ;;(asdf/find-system:error-condition condition))
+                :references nil
+                :type (type-of condition)))))
+    ;; Clobber for now
+    ((or asdf/parse-defsystem:bad-system-name
+         asdf/plan::dependency-not-done)
+     nil)))
+
 
 
 (defun parse-condition-location (condition)
@@ -299,15 +273,37 @@ return it if it is of the form (:file FILENAME :pos NUMBER)"
       (slynk:compile-file-for-emacs filename nil)))
 
 
+(defun make-relative-pathname (pathname)
+  (make-pathname
+   :name (pathname-name pathname)
+   :type (pathname-type pathname)
+   :directory (cons :relative (cdr (pathname-directory pathname)))))
+
+
+(defun flymake-fasl-directory ()
+  (let ((pathname (merge-pathnames  ".slynk/asdf/fasl/" (user-homedir-pathname))))
+    (ensure-directories-exist pathname)
+    pathname))
+
+
+(defslyfun remove-flymake-fasls ()
+  ;(uiop:delete-directory-tree (flymake-fasl-directory) :validate t)
+  nil)
+
+
 (defslyfun compile-system-for-flymake (name)
   ;; Muffle compilation
-  (format t "compile system")
+  (format t "~%~%~%~%~%START COMPILE SYSTEM" )
+  ;(uiop:delete-directory-tree (flymake-fasl-directory) :validate t)
   (let (;(*standard-output* (make-string-output-stream))
         ;(*error-output* (make-string-output-stream))
         (asdf/driver:*output-translation-function*
           (lambda (x)
-            (format t "Compile it! ~A~%" x)
-            x)))
+            (let ((pathname (merge-pathnames 
+                             (make-relative-pathname x)
+                             (flymake-fasl-directory))))
+              (format t "Compile it! ~A~%" pathname)
+            pathname))))
      (while-collecting-notes (:interactive nil)
        (operate-on-system-for-emacs name 'compile-op :force t))))
 
@@ -650,6 +646,7 @@ Example:
 
 
 (defun pathname-system (pathname)
+  (format t "call pathname-system" )
   (let ((component (pathname-component pathname)))
     (when component
       (asdf:component-name (asdf:component-system component)))))

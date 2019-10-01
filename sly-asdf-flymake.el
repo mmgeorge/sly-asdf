@@ -41,8 +41,6 @@
     (setf *sly-asdf--flymake-backend-state* (make-hash-table))
     ;; Hack to supporting highlighting arbitary buffers
     (advice-add 'flymake--highlight-line :around 'sly-asdf--flymake-highlight-around-hook)
-    ;; Run the backend
-    (sly-asdf--run-flymake-backend)
     (add-hook 'sly-asdf--after-oos-hook 'sly-asdf--run-flymake-backend nil nil)
     (add-hook 'after-change-functions 'sly-asdf--after-change-function nil nil)
     (add-hook 'after-save-hook 'sly-asdf--after-save-function nil nil)
@@ -51,7 +49,20 @@
     ;; MG: We cannot use `buffer-list-update-hook` as it is run before the buffer's underlying
     ;; file is visited (buffer-file-name) return nil. Use `post-command-hook` instead?.
     (add-hook 'window-configuration-change-hook 'sly-asdf--flymake-buffer-list-update-hook)
-    (run-with-idle-timer 0.5 t #'sly-asdf-show-popup)))
+    (run-with-idle-timer 0.5 t #'sly-asdf-show-popup)
+    ;; Initial setup
+    ;; Remove any previous flymake related fasls
+    (sly-asdf-remove-flymake-fasls)
+    ;; Determine current systems and buffers
+    (sly-asdf--flymake-buffer-list-update-hook)
+    ;; Run the backend
+    (sly-asdf--run-flymake-backend)))
+
+
+(defun sly-asdf-remove-flymake-fasls ()
+  (interactive)
+  (sly-eval
+   `(slynk-asdf:remove-flymake-fasls)))
 
 
 (defun sly-asdf--flymake-buffer-list-update-hook ()
@@ -202,7 +213,7 @@ not expected."
   "Flymake diagnostic function for sly-asdf.  REPORT-FN required callback for flymake."
   (let ((systems (hash-table-keys (sly-asdf--buffers-by-system))))
     ;; Compile each system for which there exists a corresponding buffer
-    (message "Start backend")
+    (message "Start backend" systems)
     (cl-loop for system in systems
              if (string-equal system "orphan") do
              ;; Orphaned buffers are compiled separately
