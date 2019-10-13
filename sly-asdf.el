@@ -289,7 +289,8 @@ in the directory of the current buffer."
 
 
 ;;;###autoload
-(add-to-list 'sly-contribs 'sly-asdf 'append)
+(with-eval-after-load 'sly
+  (add-to-list 'sly-contribs 'sly-asdf 'append))
 
 
 (provide 'sly-asdf)
