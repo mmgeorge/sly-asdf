@@ -110,11 +110,11 @@ buffer's working directory"
   (interactive (list (sly-asdf-read-system-name) nil t))
   (when (or load
             (and interactive
-                 (not (sly-eval `(sly:asdf-system-loaded-p ,name)))
+                 (not (sly-eval `(slynk-asdf:asdf-system-loaded-p ,name)))
                  (y-or-n-p "Load it? ")))
-    (sly-load-system name))
+    (sly-asdf-load-system name))
   (sly-eval-async
-      `(swank:asdf-system-files ,name)
+      `(slynk-asdf:asdf-system-files ,name)
     (lambda (files)
       (when files
         (let ((files (mapcar 'sly-from-lisp-filename
