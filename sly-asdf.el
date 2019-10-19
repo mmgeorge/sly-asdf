@@ -106,7 +106,7 @@ buffer's working directory"
         (dired (sly-from-lisp-filename directory))))))
 
 (defun sly-asdf-open-system (name &optional load interactive)
-  "Open all files in an ASDF system."
+  "Open all files implicated in an ASDF system, in separate emacs buffers."
   (interactive (list (sly-asdf-read-system-name) nil t))
   (when (or load
             (and interactive
