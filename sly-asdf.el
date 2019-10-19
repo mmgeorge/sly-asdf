@@ -41,7 +41,7 @@
   '(("load-system" . sly-asdf-load-system)
     ("reload-system" . sly-asdf-reload-system)
     ("browse-system" . sly-asdf-browse-system)
-    ("open-system" . sly-open-system)
+    ("open-system" . sly-asdf-open-system)
     ("save-system" . sly-asdf-save-system)))
 
 
@@ -105,7 +105,7 @@ buffer's working directory"
       (when directory
         (dired (sly-from-lisp-filename directory))))))
 
-(defun sly-open-system (name &optional load interactive)
+(defun sly-asdf-open-system (name &optional load interactive)
   "Open all files in an ASDF system."
   (interactive (list (sly-asdf-read-system-name) nil t))
   (when (or load
