@@ -14,6 +14,7 @@
 (defvar sly-asdf--last-lisp-buffers nil)
 (defvar *sly-asdf--last-point* nil)
 (defvar *sly-asdf--flymake-backend-state* nil)
+(defvar *sly-asdf--clobber-errors-with-bad-location* t)
 (defvar sly-asdf--after-oos-hook nil)
 
 
@@ -44,7 +45,7 @@
     (add-hook 'sly-asdf--after-oos-hook 'sly-asdf--run-flymake-backend nil nil)
     (add-hook 'after-change-functions 'sly-asdf--after-change-function nil nil)
     (add-hook 'after-save-hook 'sly-asdf--after-save-function nil nil)
-    (add-hook 'sly-event-hooks 'sly-asdf--before-event-function nil nil)
+    ;(add-hook 'sly-event-hooks 'sly-asdf--before-event-function nil nil)
     (run-with-idle-timer 0.5 t #'sly-asdf-show-popup)
     ;; MG: We cannot use `buffer-list-update-hook` as it is run before the buffer's underlying
     ;; file is visited (buffer-file-name) return nil. Use `post-command-hook` instead?.
@@ -103,14 +104,16 @@
 ;;(sly-asdf--run-flymake-backend)))
 
 
-(defun sly-asdf--before-event-function (&rest args)
-  "Fired before each sly event.  Takes an ARGS, the first value of which is the operation."
-  (cl-destructuring-bind ((op &rest)) args
-    (when (eq op :channel-send)
-      ;;We may have evaluated some expression that may change
-      ;; the result of compilation, e.g., loading some other system
-      (sly-asdf--run-flymake-backend)))
-  nil)
+;; MG: Let's not do this for now, flychecking the current image has side-effects
+;; and is somewhat of a strange experience
+;; (defun sly-asdf--before-event-function (&rest args)
+;;   "Fired before each sly event.  Takes an ARGS, the first value of which is the operation."
+;;   (cl-destructuring-bind ((op &rest)) args
+;;     (when (eq op :channel-send)
+;;       ;;We may have evaluated some expression that may change
+;;       ;; the result of compilation, e.g., loading some other system
+;;       (sly-asdf--run-flymake-backend)))
+;;   nil)
 
 
 (defun sly-asdf--after-save-function ()
@@ -136,9 +139,7 @@
                      (sly-asdf--remove-highlight-all-buffers)
                      (message "handle report")
                      (apply #'sly-asdf-flymake--handle-report 'sly-asdf-flymake-backend run-token args)
-                     )
-                   ;; MG: Override backend-state, lexical scoping doesn't work here -> bc async?
-                   ))))))
+                     )))))))
 
 
 (cl-defun sly-asdf-flymake--handle-report (backend token report-action
@@ -178,7 +179,6 @@ not expected."
         (flymake-error "Expected report, but got unknown key %s" report-action))
        (t
         (setq new-diags report-action)
-        (message "new diags: %s" new-diags)
         (save-restriction
           (widen)
           ;; only delete overlays if this is the first report
@@ -208,7 +208,6 @@ not expected."
             (flymake-show-diagnostics-buffer))))))))
 
 
-
 (cl-defun sly-asdf-flymake-backend (report-cb &rest _args)
   "Flymake diagnostic function for sly-asdf.  REPORT-FN required callback for flymake."
   (let ((systems (hash-table-keys (sly-asdf--buffers-by-system))))
@@ -236,8 +235,9 @@ not expected."
 
 (defun sly-asdf--compile-system-for-flymake (system report-cb)
   (message "Compile system %s" (gethash system sly-asdf--system-to-buffers))
-  (sly-eval-async `(slynk-asdf:compile-system-for-flymake ,system)
-    (create-flymake-report-fn report-cb (gethash system sly-asdf--system-to-buffers))))
+  (let ((buffers (gethash system sly-asdf--system-to-buffers)))
+    (sly-eval-async `(slynk-asdf:compile-system-for-flymake ,system '(,@buffers))
+      (create-flymake-report-fn report-cb buffers))))
 
 
 (defun create-flymake-report-fn (report-cb buffers)
@@ -248,12 +248,13 @@ not expected."
       (sly-asdf--remove-highlight-from-buffers buffers)
       (if result
           (funcall report-cb
-                   (remove-nulls
-                    (mapcar (lambda (note)
-                              (sly-asdf-note-to-diagnostic note))
-                            (sly-compilation-result.notes result)))
+                    (remove-nulls
+                     (mapcar (lambda (note)
+                               (sly-asdf-note-to-diagnostic note))
+                             (sly-compilation-result.notes result)))
                    :force t)
         (funcall report-cb nil :force t)))))
+
 
 
 (defun sly-asdf-note-to-diagnostic (note)
@@ -280,10 +281,11 @@ not expected."
                         (cl-destructuring-bind (start . end) bounds
                           (flymake-make-diagnostic buffer start end severity message))
                       (flymake-make-diagnostic buffer pos (+ pos 1) severity message))))))))
-      (progn
-        (message "%s" (car (sly-asdf--current-lisp-buffers)) )
-        (flymake-make-diagnostic (car (sly-asdf--current-lisp-buffers)) 1
-                                 (buffer-size (car (sly-asdf--current-lisp-buffers))) severity message)))))
+      (unless *sly-asdf--clobber-errors-with-bad-location*
+        (progn
+          (message "%s" (car (sly-asdf--current-lisp-buffers)) )
+          (flymake-make-diagnostic (car (sly-asdf--current-lisp-buffers)) 1
+                                   (buffer-size (car (sly-asdf--current-lisp-buffers))) severity message))))))
 
 
 (defun sly-asdf--remove-highlight (buffer)
