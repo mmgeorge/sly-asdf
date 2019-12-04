@@ -29,6 +29,8 @@
 (defmacro while-collecting ((&rest collectors) &body body)
   `(asdf::while-collecting ,collectors ,@body))
 
+(defmacro while-collecting-notes ((&key interactive) &body body)
+  `(collect-notes (lambda () ,@body) ,interactive))
 
 (defmacro asdefs (version &rest defs)
   (flet ((defun* (version name aname rest)
@@ -57,7 +59,6 @@
 ;;; Callable by RPC
 
 (defslyfun who-depends-on (system)
-  (format t "who-depends-on" )
   (flet ((system-dependencies (op system)
            (mapcar (lambda (dep)
                      (asdf::coerce-name (if (consp dep) (second dep) dep)))
@@ -76,9 +77,10 @@
 (defslyfun operate-on-system-for-emacs (system-name operation &rest keywords)
   "Compile and load SYSTEM using ASDF.
 Record compiler notes signalled as `compiler-condition's."
-  (slynk::collect-notes
-   (lambda ()
-     (apply #'operate-on-system system-name operation keywords))))
+  (slynk-asdf:while-collecting-notes (:interactive nil)
+    ;;(slynk::collect-notes
+    (apply #'operate-on-system system-name operation keywords)
+    ))
 
 
 (defslyfun list-all-systems-in-central-registry ()
@@ -177,36 +179,12 @@ already knows."
     (format nil "~d file~:p ~:*~[were~;was~:;were~] removed" removed-count)))
 
 
-(defmacro while-collecting-notes ((&key interactive) &body body)
-  `(collect-notes (lambda () ,@body) ,interactive))
-
 
 (defun stack ()
   (loop for frame = (sb-di:frame-down (sb-di:top-frame))
           then (sb-di:frame-down frame)
         while frame
         collect frame))
-
-
-                                        ;(defmethod asdf/lisp-action:call-with-around-compile-hook :around (component thunk)
-;;(describe component *error-output*)
-;;(describe thunk *error-output*)
-;; First file is the file to compile
-;;(format *error-output* "Compiling file: ~A~%" (car (asdf:input-files 'asdf:compile-op component)))
-                                        ; (call-next-method component thunk))
-
-;;(let ((s (make-string-output-stream))
-;; out)
-;; (let ((*error-output* s))
-;;   (setf out (call-next-method component thunk)))
-
-;; ;; WHY DOESNT THIS WORK?
-;; ;; DOES load-op CLOBBER THE LOAD ERROR? WE SHOULD BE ABLE TO CAPTURE THE *error-output* for
-;; ;; uiop:load*, parsing it to find the x
-;; (format *error-output* "Got compilation Error ~A~%" (get-output-stream-string s))
-;; out
-;; ))
-
 
 
 (defun collect-notes (function interactive)
@@ -222,53 +200,42 @@ already knows."
                       (end (search " is unbound" message))
                       (var-name (subseq message start end)))
                  (find-if (lambda (prev-note)
-                               (let ((type (getf prev-note :type))
-                                     (message (getf prev-note :message)))
-                                 (and (eq type 'simple-warning)
-                                      (search var-name message))))
-                             notes)))))
-    (multiple-value-bind (result seconds)
-        (handler-bind ((slynk::compiler-condition
-                         (lambda (c)
-                           (when *current-source-file*
-                             (format *error-output* "~%~%GOT CURRENT SYSTEM ~A~&" (asdf:component-pathname *current-source-file* )))
-                           (let ((note (make-compiler-note c)))
-                             (when note
-                               (push note notes)))
-                           (unless interactive
-                             ;;(loop :for frame :in (stack) :do
-                             ;;(ignore-errors
-                             ;;(describe (sb-di:code-location-debug-block (sb-di:frame-code-location frame)) *error-output*)
-                             ;;  ))
-                             ;;(loop :for r :in (compute-restarts) :do
-                             ;;(describe r *error-output*))
-                             (typecase (original-condition c)
-                               (unbound-variable (invoke-restart 'asdf/action:accept)) ;; accept error and continue compilation
-                               (t (invoke-restart 'abort)))))))
-                                        ;(when (typep (original-condition condition)
-                                        ;            'unbound-variable)
-                                        ;(format *error-output* "~A~%" (compute-restarts))
-                                        ;(describe (find-restart 'accept) *error-output* )
-          
-                                        ;(if (find-restart 'accept)
-                                        ;(invoke-restart 'accept)
-                                        ;(invoke-restart 'abort))
-                                        ;))))
-          (slynk::measure-time-interval
-           (lambda ()
-             ;; To report location of error-signaling toplevel forms
-             ;; for errors in EVAL-WHEN or during macroexpansion.
-             (restart-case (multiple-value-list (funcall function))
-               (abort () :report "Abort compilation." (list nil))))))
-      (destructuring-bind (successp &optional loadp faslfile) result
-        (let ((faslfile (etypecase faslfile
-                          (null nil)
-                          (pathname (pathname-to-filename faslfile)))))
-          (slynk::make-compilation-result :notes (reverse (remove-if #'redundant-note-p notes))
-                                          :duration seconds
-                                          :successp (if successp t)
-                                          :loadp (if loadp t)
-                                          :faslfile faslfile)))))))
+                            (let ((type (getf prev-note :type))
+                                  (message (getf prev-note :message)))
+                              (and (eq type 'simple-warning)
+                                   (search var-name message))))
+                          notes))))
+           (error-p (c) (typep (slynk-backend:original-condition c) 'error)))
+      (multiple-value-bind (result seconds)
+          (handler-bind ((slynk::compiler-condition
+                           (lambda (c)
+                             (let ((note (make-compiler-note c)))
+                               (when note
+                                 (push note notes)))
+                             (when (and (error-p c) (not interactive)) ;; For warnings, we do not need to restart
+                               ;; We may be loading a system in which case we would
+                               ;; have an accept restart that we can use to continue
+                               ;; compilation
+                               (let ((accept (find-restart 'asdf/action:accept)))
+                                 (if accept
+                                     (invoke-restart accept)
+                                     (invoke-restart 'abort)))))))
+            (slynk::measure-time-interval
+             (lambda ()
+               ;; To report location of error-signaling toplevel forms
+               ;; for errors in EVAL-WHEN or during macroexpansion.
+               (restart-case (multiple-value-list (funcall function))
+                 (abort () :report "Abort compilation." (list nil)))
+)))
+        (destructuring-bind (successp &optional loadp faslfile) result
+          (let ((faslfile (etypecase faslfile
+                            (null nil)
+                            (pathname (pathname-to-filename faslfile)))))
+            (slynk::make-compilation-result :notes (remove-if #'redundant-note-p notes)
+                                            :duration seconds
+                                            :successp (if successp t)
+                                            :loadp (if loadp t)
+                                            :faslfile faslfile)))))))
 
 
 (defvar *asdf-condition-types*
@@ -278,7 +245,7 @@ already knows."
     asdf/plan::dependency-not-done
     asdf:system-definition-error
     uiop/lisp-build:compile-file-error
-    ))
+    uiop/lisp-build:compile-warned-warning))
 
 
 (defun asdf-condition-p (condition)
@@ -287,11 +254,10 @@ already knows."
 
 (defun make-compiler-note (condition)
   "Make a compiler note data structure from a compiler-condition."
-  (format *error-output* "MAKE COMPILER_NOTE ~A" *current-source-file*)
   ;;(declare (type compiler-condition condition))
   (if (asdf-condition-p (original-condition condition))
       (make-asdf-note (original-condition condition))
-      (unless (member (severity condition) '(:style-warning :redefinition))
+      (unless (member (severity condition) '(:redefinition))
         (list* :message (message condition)
                :severity (severity condition)
                ;; MG: If we were unable to get the precise source location, replace with
@@ -299,6 +265,7 @@ already knows."
                :location (replace-location-if-error (location condition)) 
                :references (references condition)
                :type (type-of (original-condition condition))
+               :asdf nil
                (let ((s (source-context condition)))
                  (if s (list :source-context s)))))))
 
@@ -322,18 +289,19 @@ already knows."
        (unless (search "/quicklisp" message)
          (list* :message message
                 :severity :error
-                :location nil ;;(parse-condition-location
-                ;;(asdf/find-system:error-condition condition))
+                :location nil
+                ;;(parse-condition-location ;;(asdf/find-system:error-condition condition))
                 :references nil
-                :type (type-of condition)))))
+                :type (type-of condition)
+                :asdf t
+                ))))
     ;; Clobber for now
     ((or asdf/parse-defsystem:bad-system-name
-         asdf/plan::dependency-not-done)
+         asdf/plan::dependency-not-done
+         uiop/lisp-build:compile-warned-warning ;; "Lisp compilation had style-warnings while compiling ..."
+         )
      nil)
-    (uiop/lisp-build:compile-file-error nil
-     (format *error-output* "~a~%" condition)
-     )
-    ))
+    (uiop/lisp-build:compile-file-error nil)))
 
 
 
@@ -381,7 +349,7 @@ on these directly to improve load-time error messages")
   ;; we keep track of a list of *CURRENT-SYSTEM-BUFFERS*
   (let ((*current-component* component))
     (let ((op (if (typep operation 'asdf:load-op)
-                  (asdf:make-operation 'asdf:load-op)
+                  (asdf:make-operation 'asdf:load-source-op)
                   operation)))
       (call-next-method plan op component))))
 
@@ -418,8 +386,8 @@ on these directly to improve load-time error messages")
     (return-from compile-system-for-flymake))
   ;; Muffle compilation
   ;;(uiop:delete-directory-tree (flymake-fasl-directory) :validate t)
-  (let (;;(*standard-output* (make-string-output-stream))
-        ;;(*error-output* (make-string-output-stream))
+  (let ((*standard-output* (make-string-output-stream))
+        (*error-output* (make-string-output-stream))
         (asdf/driver:*output-translation-function*
           (lambda (x)
             (let ((pathname (merge-pathnames 
@@ -433,19 +401,22 @@ on these directly to improve load-time error messages")
 (defun check-compilation-errors-for-system (system buffers)
   (let ((stream (make-string-output-stream)))
     (spawn-compilation-process-for-system system buffers :stream stream)
-    (parse-compilation-result (make-string-input-stream (get-output-stream-string stream)))))
+    (parse-compilation-result (get-output-stream-string stream))))
 
 
-(defun parse-compilation-result (stream)
-  (loop for form = (handler-case (read stream nil nil) (t () t))
-        while form
-        when (and (listp form)
-                  (equal "COMPILATION-RESULT" (symbol-name (car form))))
-          do (return-from parse-compilation-result form)))
-
+(defun parse-compilation-result (string)
+  (handler-bind ((error
+                   (lambda (e)
+                     (declare (ignore e))
+                     ;; We may attempt to intern error types of packages that
+                     ;; do not exist in the current context (e.g.: ALEXANDRIA.DEV.0::SIMPLE-STYLE-WARNING)
+                     ;; This will capture that error and instead use the current package
+                     (invoke-restart (fourth (compute-restarts)))
+                     )))
+    (read-from-string (subseq string (search "(:COMPILATION-RESULT" string)))))
+  
 
 (defun spawn-compilation-process-for-system (system buffers &key stream)
-  (declare (ignore buffers))
   (uiop/driver:run-program
    `("sbcl" "--non-interactive"
             ;; Transfer the current value for the *central-repository*. This includes the current
@@ -455,12 +426,25 @@ on these directly to improve load-time error messages")
             "--eval" "(asdf:load-system \"slynk\")"
             "--eval" "(asdf:load-system \"slynk-asdf\")"
             "--eval" ,(with-output-to-string (s)
-                       (print-object `(setf slynk-asdf:*current-system-buffers* ',buffers) s))
-            "--eval" "(asdf:load-system \"slynk-asdf-runner\")"
-            "--eval" ,(format nil "(slynk-asdf-runner:check-for-compilation-errors \"~A\")" system)
-            )
-   :output stream
-   :error-output *standard-output*))
+                        (print-object `(setf slynk-asdf:*current-system-buffers* ',buffers) s))
+            "--eval" "(in-package :slynk-asdf)"
+            "--eval" ,(with-output-to-string (s)
+                        (print-object
+                         ;; Send output to *standard-output* for parsing later
+                         `(progn
+                            (format *standard-output* "~%") ;; Ensure new line
+                            (print-object
+                             (let ((asdf/driver:*output-translation-function*
+                                     (slynk-asdf:make-output-translation-function))
+                                   (*standard-output* (make-string-output-stream)))
+                               (slynk-asdf::operate-on-system-for-emacs ,system 'load-op :force t))
+                             *standard-output*))
+                          s)))
+   :error-output *standard-output*
+   :output stream))
+
+
+
 
 
 ;;; Internal
@@ -749,8 +733,7 @@ Example:
   ;;(handler-case
   (slynk-backend:with-compilation-hooks ()
     (apply #'asdf:operate (asdf-operation operation-name)
-           system-name keyword-args)
-    t))
+           system-name keyword-args)))
 ;;((or asdf:compile-error #+asdf3 asdf/lisp-build:compile-file-error)
 ;; () nil)))
 
@@ -825,7 +808,6 @@ Example:
 
 
 (defun pathname-system (pathname)
-  (format t "call pathname-system" )
   (let ((component (pathname-component pathname)))
     (when component
       (asdf:component-name (asdf:component-system component)))))

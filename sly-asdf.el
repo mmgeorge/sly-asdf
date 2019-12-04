@@ -70,7 +70,7 @@
 Default system name is taken from first file matching *.asd in current
 buffer's working directory"
   (interactive (list (sly-asdf-read-system-name)))
-  (sly-asdf-oos system 'load-op))
+  (sly-asdf-oos system 'load-op :force t))
 
 
 (defun sly-asdf-reload-system (system)

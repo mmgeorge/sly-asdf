@@ -14,7 +14,7 @@
 (defvar sly-asdf--last-lisp-buffers nil)
 (defvar *sly-asdf--last-point* nil)
 (defvar *sly-asdf--flymake-backend-state* nil)
-(defvar *sly-asdf--clobber-errors-with-bad-location* t)
+(defvar *sly-asdf--clobber-errors-with-bad-location* nil)
 (defvar sly-asdf--after-oos-hook nil)
 
 
@@ -93,7 +93,6 @@
     (cl-loop for buffer being the hash-keys of sly-asdf--buffer-to-system
              using (hash-value system) do 
              (push buffer (gethash system buffers-by-system)))
-    (message "%s" buffers-by-system)
     buffers-by-system))
 
 
@@ -135,9 +134,7 @@
                  (lambda (&rest args)
                    ;;MG: Override backend-state, lexical scoping doesn't work here -> bc async?
                    (let ((flymake--backend-state *sly-asdf--flymake-backend-state*))
-                     (message "remove hl")
                      (sly-asdf--remove-highlight-all-buffers)
-                     (message "handle report")
                      (apply #'sly-asdf-flymake--handle-report 'sly-asdf-flymake-backend run-token args)
                      )))))))
 
@@ -212,7 +209,6 @@ not expected."
   "Flymake diagnostic function for sly-asdf.  REPORT-FN required callback for flymake."
   (let ((systems (hash-table-keys (sly-asdf--buffers-by-system))))
     ;; Compile each system for which there exists a corresponding buffer
-    (message "Start backend" systems)
     (cl-loop for system in systems
              if (string-equal system "orphan") do
              ;; Orphaned buffers are compiled separately
@@ -234,17 +230,14 @@ not expected."
 
 
 (defun sly-asdf--compile-system-for-flymake (system report-cb)
-  (message "Compile system %s" (gethash system sly-asdf--system-to-buffers))
   (let ((buffers (gethash system sly-asdf--system-to-buffers)))
     (sly-eval-async `(slynk-asdf:compile-system-for-flymake ,system '(,@buffers))
       (create-flymake-report-fn report-cb buffers))))
 
 
 (defun create-flymake-report-fn (report-cb buffers)
-  (message "create-flymake-report-fn: buffers %s" buffers)
   (cl-flet ((remove-nulls (list) (cl-remove-if-not #'identity list)))
     (lambda (result)
-      (message "create-flymake-report-fn2: buffers %s %s" buffers result)
       (sly-asdf--remove-highlight-from-buffers buffers)
       (if result
           (funcall report-cb
@@ -257,20 +250,23 @@ not expected."
 
 
 
+(defun sly-asdf--parse-severity (severity)
+  (cl-case severity
+    ((:warning :style-warning) :warning)
+    (t :error)))
+
+
 (defun sly-asdf-note-to-diagnostic (note)
   "Create a diagnostic for the given sly NOTE found in the buffer SOURCE."
-  (message "%s" (sly-note.location note))
   (let* ((message (sly-note.message note))
          (location (sly-note.location note))
-         (severity (sly-note.severity note)))
+         (severity (sly-asdf--parse-severity (sly-note.severity note))))
     ;; Location may be an (:error) w/o a buffer, in which sly-location.buffer
     ;; returns a string (the error message)
     (if (and location (listp (sly-location.buffer location))) 
         (progn 
-          (message "location!: %s buf: %s " location (sly-location.buffer location))
           (let ((buffer (get-file-buffer (cadr (sly-location.buffer location))))
                 (pos (cadr (sly-location.position location ))))
-            (message "buf2!: %s " buffer)
             (when buffer 
               (with-current-buffer buffer
                 (save-excursion
@@ -283,7 +279,6 @@ not expected."
                       (flymake-make-diagnostic buffer pos (+ pos 1) severity message))))))))
       (unless *sly-asdf--clobber-errors-with-bad-location*
         (progn
-          (message "%s" (car (sly-asdf--current-lisp-buffers)) )
           (flymake-make-diagnostic (car (sly-asdf--current-lisp-buffers)) 1
                                    (buffer-size (car (sly-asdf--current-lisp-buffers))) severity message))))))
 
@@ -312,7 +307,6 @@ the diagnostic to highlight.  Needed because flymake-highlight does
 not pass the diagnostic's buffer to `make-overlay`."
   (let ((diagnostic (car args)))
     (with-current-buffer (flymake--diag-buffer diagnostic)
-      (message "buf %s" (current-buffer))
       (apply fun args))))
 
 
