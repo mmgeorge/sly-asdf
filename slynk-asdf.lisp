@@ -180,11 +180,11 @@ already knows."
 
 
 
-(defun stack ()
-  (loop for frame = (sb-di:frame-down (sb-di:top-frame))
-          then (sb-di:frame-down frame)
-        while frame
-        collect frame))
+;; (defun stack ()
+;;   (loop for frame = (sb-di:frame-down (sb-di:top-frame))
+;;           then (sb-di:frame-down frame)
+;;         while frame
+;;         collect frame))
 
 
 (defun collect-notes (function interactive)
@@ -315,14 +315,12 @@ return it if it is of the form (:file FILENAME :pos NUMBER)"
             (slynk-mop:slot-value-using-class  (class-of condition) condition slot))))
 
 
-(defslyfun compile-file-for-flymake (filename)
-  (let (;;(pathname (slynk-backend:filename-to-pathname filename))
-        ;; Muffle compilation
-        ;;(*standard-output* (make-string-output-stream))
-        ;;(*error-output* (make-string-output-stream))
-        )
-    ;;(handler-bind ((slynk-backend:compiler-condition #'compiler-condition-handler))
-    (slynk:compile-file-for-emacs filename nil)))
+(defslyfun compile-files-for-flymake (filenames)
+  (let (;; Muffle compilation
+        (*standard-output* (make-string-output-stream))
+        (*error-output* (make-string-output-stream)))
+    `(:compilation-result 
+      ,(mapcan #'(lambda (filename) (cadr (slynk:compile-file-for-emacs filename nil))) filenames))))
 
 
 
@@ -336,22 +334,22 @@ on these directly to improve load-time error messages")
     (call-next-method)))
 
 
-(defmethod asdf/plan:record-dependency :around (plan operation component)
-  ;; load-op provides significantly worse debugging information as it involves
-  ;; loading fasls rather than the source code directly. On SBCL, loading a fasl
-  ;; will fail to capture the context for top-level errors.
-  ;;
-  ;; e.g
-  ;; (setf undefined-var 2) ;; Throws an error on load, but source context is NIL
-  ;; 
-  ;; This prevents us
-  ;; from being able to given a line number for the error. To get around this,
-  ;; we keep track of a list of *CURRENT-SYSTEM-BUFFERS*
-  (let ((*current-component* component))
-    (let ((op (if (typep operation 'asdf:load-op)
-                  (asdf:make-operation 'asdf:load-source-op)
-                  operation)))
-      (call-next-method plan op component))))
+;; (defmethod asdf/plan:record-dependency :around (plan operation component)
+;;   ;; load-op provides significantly worse debugging information as it involves
+;;   ;; loading fasls rather than the source code directly. On SBCL, loading a fasl
+;;   ;; will fail to capture the context for top-level errors.
+;;   ;;
+;;   ;; e.g
+;;   ;; (setf undefined-var 2) ;; Throws an error on load, but source context is NIL
+;;   ;; 
+;;   ;; This prevents us
+;;   ;; from being able to given a line number for the error. To get around this,
+;;   ;; we keep track of a list of *CURRENT-SYSTEM-BUFFERS*
+;;   (let ((*current-component* component))
+;;     (let ((op (if (typep operation 'asdf:load-op)
+;;                   (asdf:make-operation 'asdf:load-source-op)
+;;                   operation)))
+;;       (call-next-method plan op component))))
 
 
 (defun make-relative-pathname (pathname)

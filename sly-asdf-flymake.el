@@ -212,21 +212,15 @@ not expected."
     (cl-loop for system in systems
              if (string-equal system "orphan") do
              ;; Orphaned buffers are compiled separately
-             (mapc #'(lambda (buf) (sly-asdf--compile-buffer-for-flymake buf report-cb))
-                   (gethash systems system))
+             (sly-asdf--compile-files-for-flymake (gethash system sly-asdf--system-to-buffers) report-cb)
              else do
              (sly-asdf--compile-system-for-flymake system report-cb))))
 
 
-(defun sly-asdf--compile-buffer-for-flymake (buffer report-cb)
-  (sly-asdf--compile-for-flymake
-   (buffer-file-name buffer)
-   (create-flymake-report-fn report-cb (list buffer))))
-
-
-(defun sly-asdf--compile-for-flymake (filename callback)
-  "Compile FILENAME for Emacs, calling CALLBACK with the result of compilation."
-  (sly-eval-async `(slynk-asdf:compile-file-for-flymake ,filename) callback))
+(defun sly-asdf--compile-files-for-flymake (filenames report-cb)
+  "Compile FILENAMES for Emacs, calling REPORT-CB with the result of compilation."
+  (sly-eval-async `(slynk-asdf:compile-files-for-flymake '(,@filenames))
+    (create-flymake-report-fn report-cb filenames)))
 
 
 (defun sly-asdf--compile-system-for-flymake (system report-cb)
