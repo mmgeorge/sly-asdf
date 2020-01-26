@@ -1,6 +1,6 @@
 ;;; sly-asdf-flymake.el --- Flymake support for sly-asdf -*- lexical-binding: t; -*-
 
-(require 'flymake)
+(require 'sly-asdf-flymake-base)
 (require 'popup)
 (require 'cl-lib)
 
@@ -29,19 +29,19 @@
 
 
 (defun sly-asdf-flymake ()
-  "Enable flymake support."
+  "Enable sly-asdf-flymake-base support."
   ;; MG: Some hacking was needed to get this to work. The main
-  ;; issue here being that flymake largely seems written with the assumption
+  ;; issue here being that sly-asdf-flymake-base largely seems written with the assumption
   ;; of running and highlighting errors exclusively in the `current-buffer`.
   ;; Error state is buffer-local despite the error reporting format taking a buffer
-  ;; However, in our case, we would like flymake to be system aware, as well
+  ;; However, in our case, we would like sly-asdf-flymake-base to be system aware, as well
   ;; as to continue to report errors if, for instance, we are in another buffer,
   ;; (e.g. the REPL)
   (when sly-asdf-enable-flymake
-    (flymake-mode 1)
+    (sly-asdf-flymake-base-mode 1)
     (setf *sly-asdf--flymake-backend-state* (make-hash-table))
     ;; Hack to supporting highlighting arbitary buffers
-    (advice-add 'flymake--highlight-line :around 'sly-asdf--flymake-highlight-around-hook)
+    (advice-add 'sly-asdf-flymake-base--highlight-line :around 'sly-asdf--flymake-highlight-around-hook)
     (add-hook 'sly-asdf--after-oos-hook 'sly-asdf--run-flymake-backend nil nil)
     (add-hook 'after-change-functions 'sly-asdf--after-change-function nil nil)
     (add-hook 'after-save-hook 'sly-asdf--after-save-function nil nil)
@@ -52,7 +52,7 @@
     (add-hook 'window-configuration-change-hook 'sly-asdf--flymake-buffer-list-update-hook)
     (run-with-idle-timer 0.5 t #'sly-asdf-show-popup)
     ;; Initial setup
-    ;; Remove any previous flymake related fasls
+    ;; Remove any previous sly-asdf-flymake-base related fasls
     (sly-asdf-remove-flymake-fasls)
     ;; Determine current systems and buffers
     (sly-asdf--flymake-buffer-list-update-hook)
@@ -123,17 +123,17 @@
 (defun sly-asdf--run-flymake-backend ()
   "Flymake backend."
   ;;Override backend-state
-  (let ((flymake--backend-state *sly-asdf--flymake-backend-state*))
-    (flymake--with-backend-state 'sly-asdf-flymake-backend state
+  (let ((sly-asdf-flymake-base--backend-state *sly-asdf--flymake-backend-state*))
+    (sly-asdf-flymake-base--with-backend-state 'sly-asdf-flymake-backend state
       (let ((run-token (cl-gensym "backend-token")))
-        (setf (flymake--backend-state-running state) run-token
-              (flymake--backend-state-disabled state) nil
-              (flymake--backend-state-diags state) nil
-              (flymake--backend-state-reported-p state) nil)
+        (setf (sly-asdf-flymake-base--backend-state-running state) run-token
+              (sly-asdf-flymake-base--backend-state-disabled state) nil
+              (sly-asdf-flymake-base--backend-state-diags state) nil
+              (sly-asdf-flymake-base--backend-state-reported-p state) nil)
         (funcall 'sly-asdf-flymake-backend
                  (lambda (&rest args)
                    ;;MG: Override backend-state, lexical scoping doesn't work here -> bc async?
-                   (let ((flymake--backend-state *sly-asdf--flymake-backend-state*))
+                   (let ((sly-asdf-flymake-base--backend-state *sly-asdf--flymake-backend-state*))
                      (sly-asdf--remove-highlight-all-buffers)
                      (apply #'sly-asdf-flymake--handle-report 'sly-asdf-flymake-backend run-token args)
                      )))))))
@@ -147,66 +147,66 @@ BACKEND, REPORT-ACTION and EXPLANATION, and FORCE conform to the calling
 convention described in `flymake-diagnostic-functions' (which
 see). Optional FORCE says to handle a report even if TOKEN was
 not expected."
-  (let* ((state (gethash backend flymake--backend-state))
-         (first-report (not (flymake--backend-state-reported-p state))))
-    (setf (flymake--backend-state-reported-p state) t)
+  (let* ((state (gethash backend sly-asdf-flymake-base--backend-state))
+         (first-report (not (sly-asdf-flymake-base--backend-state-reported-p state))))
+    (setf (sly-asdf-flymake-base--backend-state-reported-p state) t)
     (let (expected-token
           new-diags)
       (cond
        ((null state)
-        (flymake-error
+        (sly-asdf-flymake-base-error
          "Unexpected report from unknown backend %s" backend))
-       ((flymake--backend-state-disabled state)
-        (flymake-error
+       ((sly-asdf-flymake-base--backend-state-disabled state)
+        (sly-asdf-flymake-base-error
          "Unexpected report from disabled backend %s" backend))
        ((progn
-          (setq expected-token (flymake--backend-state-running state))
+          (setq expected-token (sly-asdf-flymake-base--backend-state-running state))
           (null expected-token))
         ;; should never happen
-        (flymake-error "Unexpected report from stopped backend %s" backend))
+        (sly-asdf-flymake-base-error "Unexpected report from stopped backend %s" backend))
        ((not (or (eq expected-token token)
                  force))
-        (flymake-error "Obsolete report from backend %s with explanation %s"
+        (sly-asdf-flymake-base-error "Obsolete report from backend %s with explanation %s"
                        backend explanation))
        ((eq :panic report-action)
-        (flymake--disable-backend backend explanation))
+        (sly-asdf-flymake-base--disable-backend backend explanation))
        ((not (listp report-action))
-        (flymake--disable-backend backend
+        (sly-asdf-flymake-base--disable-backend backend
                                   (format "Unknown action %S" report-action))
-        (flymake-error "Expected report, but got unknown key %s" report-action))
+        (sly-asdf-flymake-base-error "Expected report, but got unknown key %s" report-action))
        (t
         (setq new-diags report-action)
         (save-restriction
           (widen)
           ;; only delete overlays if this is the first report
           ;; (when first-report
-          ;;   (flymake-delete-own-overlays
+          ;;   (sly-asdf-flymake-base-delete-own-overlays
           ;;    (lambda (ov)
           ;;      (eq backend
-          ;;          (flymake--diag-backend
-          ;;           (overlay-get ov 'flymake-diagnostic)))))
+          ;;          (sly-asdf-flymake-base--diag-backend
+          ;;           (overlay-get ov 'sly-asdf-flymake-base-diagnostic)))))
 
           ;;   )
           (mapc (lambda (diag)
-                  (flymake--highlight-line diag)
-                  (setf (flymake--diag-backend diag) backend))
+                  (sly-asdf-flymake-base--highlight-line diag)
+                  (setf (sly-asdf-flymake-base--diag-backend diag) backend))
                 new-diags)
-          (setf (flymake--backend-state-diags state)
-                (append new-diags (flymake--backend-state-diags state)))
-          (when flymake-check-start-time
-            (flymake-log :debug "backend %s reported %d diagnostics in %.2f second(s)"
+          (setf (sly-asdf-flymake-base--backend-state-diags state)
+                (append new-diags (sly-asdf-flymake-base--backend-state-diags state)))
+          (when sly-asdf-flymake-base-check-start-time
+            (sly-asdf-flymake-base-log :debug "backend %s reported %d diagnostics in %.2f second(s)"
                          backend
                          (length new-diags)
-                         (- (float-time) flymake-check-start-time)))
-          (when (and (get-buffer (flymake--diagnostics-buffer-name))
-                     (get-buffer-window (flymake--diagnostics-buffer-name))
-                     (null (cl-set-difference (flymake-running-backends)
-                                              (flymake-reporting-backends))))
-            (flymake-show-diagnostics-buffer))))))))
+                         (- (float-time) sly-asdf-flymake-base-check-start-time)))
+          (when (and (get-buffer (sly-asdf-flymake-base--diagnostics-buffer-name))
+                     (get-buffer-window (sly-asdf-flymake-base--diagnostics-buffer-name))
+                     (null (cl-set-difference (sly-asdf-flymake-base-running-backends)
+                                              (sly-asdf-flymake-base-reporting-backends))))
+            (sly-asdf-flymake-base-show-diagnostics-buffer))))))))
 
 
 (cl-defun sly-asdf-flymake-backend (report-cb &rest _args)
-  "Flymake diagnostic function for sly-asdf.  REPORT-FN required callback for flymake."
+  "Flymake diagnostic function for sly-asdf.  REPORT-FN required callback for sly-asdf-flymake-base."
   (let ((systems (hash-table-keys (sly-asdf--buffers-by-system))))
     ;; Compile each system for which there exists a corresponding buffer
     (cl-loop for system in systems
@@ -269,38 +269,38 @@ not expected."
                                     (sly-bounds-of-sexp-at-point))))
                     (if bounds
                         (cl-destructuring-bind (start . end) bounds
-                          (flymake-make-diagnostic buffer start end severity message))
-                      (flymake-make-diagnostic buffer pos (+ pos 1) severity message))))))))
+                          (sly-asdf-flymake-base-make-diagnostic buffer start end severity message))
+                      (sly-asdf-flymake-base-make-diagnostic buffer pos (+ pos 1) severity message))))))))
       (unless *sly-asdf--clobber-errors-with-bad-location*
         (progn
-          (flymake-make-diagnostic (car (sly-asdf--current-lisp-buffers)) 1
+          (sly-asdf-flymake-base-make-diagnostic (car (sly-asdf--current-lisp-buffers)) 1
                                    (buffer-size (car (sly-asdf--current-lisp-buffers))) severity message))))))
 
 
 (defun sly-asdf--remove-highlight (buffer)
-  "Remove flymake overlays from target BUFFER."
+  "Remove sly-asdf-flymake-base overlays from target BUFFER."
   (save-excursion
     (with-current-buffer buffer
-      (flymake-delete-own-overlays))))
+      (sly-asdf-flymake-base-delete-own-overlays))))
 
 
 (defun sly-asdf--remove-highlight-all-buffers ()
-  "Remove flymake overlays from all Lisp buffers."
+  "Remove sly-asdf-flymake-base overlays from all Lisp buffers."
   (cl-mapcar 'sly-asdf--remove-highlight (sly-asdf--current-lisp-buffers)))
 
 
 (defun sly-asdf--remove-highlight-from-buffers (buffers)
-  "Remove flymake overlays from all Lisp buffers."
+  "Remove sly-asdf-flymake-base overlays from all Lisp buffers."
   (cl-mapcar 'sly-asdf--remove-highlight buffers))
 
 
 (defun sly-asdf--flymake-highlight-around-hook (fun &rest args)
-  "Hook to apply around flymake-highlight.
+  "Hook to apply around sly-asdf-flymake-base-highlight.
 FUN is the original function and ARGS is a list containing
-the diagnostic to highlight.  Needed because flymake-highlight does
+the diagnostic to highlight.  Needed because sly-asdf-flymake-base-highlight does
 not pass the diagnostic's buffer to `make-overlay`."
   (let ((diagnostic (car args)))
-    (with-current-buffer (flymake--diag-buffer diagnostic)
+    (with-current-buffer (sly-asdf-flymake-base--diag-buffer diagnostic)
       (apply fun args))))
 
 
@@ -309,9 +309,9 @@ not pass the diagnostic's buffer to `make-overlay`."
   (let ((point (point)))
     (unless (equal point *sly-asdf--last-point*)
       (setf *sly-asdf--last-point* point)
-      (let ((diags (flymake-diagnostics point)))
+      (let ((diags (sly-asdf-flymake-base-diagnostics point)))
         (when diags
-          (popup-tip (flymake-diagnostic-text (car diags)) :point point))))))
+          (popup-tip (sly-asdf-flymake-base-diagnostic-text (car diags)) :point point))))))
 
 
 
