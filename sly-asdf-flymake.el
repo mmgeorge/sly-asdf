@@ -4,7 +4,7 @@
 (require 'popup)
 (require 'cl-lib)
 
-(defvar sly-asdf-enable-flymake 1)
+(defvar sly-asdf-enable-experimental-syntax-checking nil)
 
 (defvar *sly-asdf-lisp-extensions* (list "lisp")
   "File extensions to look for when finding open Lisp files.")
@@ -37,7 +37,7 @@
   ;; However, in our case, we would like sly-asdf-flymake-base to be system aware, as well
   ;; as to continue to report errors if, for instance, we are in another buffer,
   ;; (e.g. the REPL)
-  (when sly-asdf-enable-flymake
+  (when sly-asdf-enable-experimental-syntax-checking
     (sly-asdf-flymake-base-mode 1)
     (setf *sly-asdf--flymake-backend-state* (make-hash-table))
     ;; Hack to supporting highlighting arbitary buffers
