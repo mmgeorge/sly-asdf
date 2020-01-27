@@ -43,6 +43,7 @@
   '(("load-system" . sly-asdf-load-system)
     ("reload-system" . sly-asdf-reload-system)
     ("browse-system" . sly-asdf-browse-system)
+    ("open-system" . sly-asdf-open-system)
     ("save-system" . sly-asdf-save-system)))
 
 
@@ -118,6 +119,22 @@ buffer's working directory"
       (when directory
         (dired (sly-from-lisp-filename directory))))))
 
+(defun sly-asdf-open-system (name &optional load interactive)
+  "Open all files implicated in an ASDF system, in separate emacs buffers."
+  (interactive (list (sly-asdf-read-system-name) nil t))
+  (when (or load
+            (and interactive
+                 (not (sly-eval `(slynk-asdf:asdf-system-loaded-p ,name)))
+                 (y-or-n-p "Load it? ")))
+    (sly-asdf-load-system name))
+  (sly-eval-async
+      `(slynk-asdf:asdf-system-files ,name)
+    (lambda (files)
+      (when files
+        (let ((files (mapcar 'sly-from-lisp-filename
+                             (nreverse files))))
+          (find-file-other-window (car files))
+          (mapc 'find-file (cdr files)))))))
 
 (defun sly-asdf-rgrep-system (sys-name regexp)
   "Run `rgrep' for REGEXP for SYS-NAME on the base directory of an ASDF system."
@@ -260,6 +277,16 @@ in the directory of the current buffer."
                        'sly-asdf-system-history default-value))))
 
 
+(cl-defun sly-asdf-find-current-system (&optional (buffer (car (sly-asdf--current-lisp-buffers))))
+  "Find the name of the current asd system."
+  (when buffer
+    (let* ((buffer-file-name (buffer-file-name buffer ))
+           (directory (file-name-directory buffer-file-name))
+           (system-file (sly-asdf-find-system-file directory)))
+      (when system-file
+        (file-name-base system-file)))))
+
+
 (cl-defun sly-asdf-find-system-file (directory &optional (depth sly-asdf-find-system-file-max-depth))
   "Find the first file in the current DIRECTORY or a parent of DIRECTORY that includes a .asd file."
   (let ((fname (directory-file-name directory)))
@@ -297,7 +324,8 @@ in the directory of the current buffer."
 
 
 ;;;###autoload
-(add-to-list 'sly-contribs 'sly-asdf 'append)
+(with-eval-after-load 'sly
+  (add-to-list 'sly-contribs 'sly-asdf 'append))
 
 
 (provide 'sly-asdf)

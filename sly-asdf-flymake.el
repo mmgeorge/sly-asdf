@@ -18,16 +18,6 @@
 (defvar sly-asdf--after-oos-hook nil)
 
 
-(cl-defun sly-asdf-find-current-system (&optional (buffer (car (sly-asdf--current-lisp-buffers))))
-  "Find the name of the current asd system."
-  (when buffer
-    (let* ((buffer-file-name (buffer-file-name buffer ))
-           (directory (file-name-directory buffer-file-name))
-           (system-file (sly-asdf-find-system-file directory)))
-      (when system-file
-        (file-name-base system-file)))))
-
-
 (defun sly-asdf-flymake ()
   "Enable sly-asdf-flymake-base support."
   ;; MG: Some hacking was needed to get this to work. The main
