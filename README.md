@@ -14,7 +14,7 @@ Installing manually will require the contrib be registered in SLY's `sly-contrib
 (add-to-list 'sly-contribs 'sly-asdf 'append)
 ```
 ## Experimental Features
-sly-asdf currently supports some very experimental syntax checker that builds on flymake. This loads the system in a separate process and highlights any compilation/load errors for currently opened buffers. Only tested with SBCL. Enable this with 
+sly-asdf currently supports a very experimental syntax checker that builds on flymake. This loads the system in a separate process and highlights any compilation/load errors for currently opened buffers. Only tested with SBCL. Enable this with 
 ```
 (setq sly-asdf-enable-experimental-syntax-checker t)
 ```
