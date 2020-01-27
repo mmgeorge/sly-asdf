@@ -1,4 +1,5 @@
-;;; slynk-asdf.lisp -- ASDF support
+
+;;; Slynk-asdf.lisp -- ASDF support
 ;;; Ported from swank-asdf <https://github.com/slime/slime/blob/master/contrib/swank-asdf.lisp>
 ;; Authors: Daniel Barlow <dan@telent.net>
 ;;          Marco Baringer <mb@bese.it>
@@ -7,16 +8,20 @@
 ;;          and others
 ;; License: Public Domain
 
+
 (defpackage :slynk-asdf
   (:use :cl :slynk-api :slynk-backend)
   (:import-from :slynk)
-  (:export))
+  (:export #:make-output-translation-function
+           #:while-collecting-notes
+           #:*current-system-buffers*))
 
 (in-package :slynk-asdf)
 
 
 (defvar *recompile-system* nil)
 (defvar *pathname-component* (make-hash-table :test 'equal))
+(defvar *current-source-file* nil)
 
 
 ;;; Macros
@@ -24,6 +29,8 @@
 (defmacro while-collecting ((&rest collectors) &body body)
   `(asdf::while-collecting ,collectors ,@body))
 
+(defmacro while-collecting-notes ((&key interactive) &body body)
+  `(collect-notes (lambda () ,@body) ,interactive))
 
 (defmacro asdefs (version &rest defs)
   (flet ((defun* (version name aname rest)
@@ -41,12 +48,12 @@
               (defvar ,aname ,@rest))))
     `(progn
        ,@(loop :for (def name . args) :in defs
-               :for aname = (intern (string name) :asdf)
-               :collect
-               (ecase def
-                 ((defun) (defun* version name aname args))
-                 ((defmethod) (defmethod* version aname args))
-                 ((defvar) (defvar* name aname args)))))))
+            :for aname = (intern (string name) :asdf)
+            :collect
+              (ecase def
+                ((defun) (defun* version name aname args))
+                ((defmethod) (defmethod* version aname args))
+                ((defvar) (defvar* name aname args)))))))
 
 
 ;;; Callable by RPC
@@ -70,9 +77,10 @@
 (defslyfun operate-on-system-for-emacs (system-name operation &rest keywords)
   "Compile and load SYSTEM using ASDF.
 Record compiler notes signalled as `compiler-condition's."
-  (slynk::collect-notes
-   (lambda ()
-     (apply #'operate-on-system system-name operation keywords))))
+  (slynk-asdf:while-collecting-notes (:interactive nil)
+                                     ;;(slynk::collect-notes
+                                     (apply #'operate-on-system system-name operation keywords)
+                                     ))
 
 
 (defslyfun list-all-systems-in-central-registry ()
@@ -82,27 +90,27 @@ AND in its source-registry. (legacy name)"
    (mapcar
     #'pathname-name
     (while-collecting (c)
-      (loop for dir in asdf:*central-registry*
-            for defaults = (eval dir)
-            when defaults
-            do (collect-asds-in-directory defaults #'c))
-      (asdf:ensure-source-registry)
-      (if (or #+asdf3 t
-	      #-asdf3 (asdf:version-satisfies (asdf:asdf-version) "2.15"))
-          (loop :for k :being :the :hash-keys :of asdf::*source-registry*
-		:do (c k))
-	  #-asdf3
-          (dolist (entry (asdf::flatten-source-registry))
-            (destructuring-bind (directory &key recurse exclude) entry
-              (register-asd-directory
-               directory
-               :recurse recurse :exclude exclude :collect #'c))))))))
+                      (loop for dir in asdf:*central-registry*
+                         for defaults = (eval dir)
+                         when defaults
+                         do (collect-asds-in-directory defaults #'c))
+                      (asdf:ensure-source-registry)
+                      (if (or #+asdf3 t
+                              #-asdf3 (asdf:version-satisfies (asdf:asdf-version) "2.15"))
+                          (loop :for k :being :the :hash-keys :of asdf::*source-registry*
+                             :do (c k))
+                          #-asdf3
+                          (dolist (entry (asdf::flatten-source-registry))
+                            (destructuring-bind (directory &key recurse exclude) entry
+                              (register-asd-directory
+                               directory
+                               :recurse recurse :exclude exclude :collect #'c))))))))
 
 
 (defslyfun list-all-systems-known-to-asdf ()
   "Returns a list of all systems ASDF knows already."
   (while-collecting (c)
-    (asdf::map-systems (lambda (system) (c (asdf:component-name system))))))
+                    (asdf::map-systems (lambda (system) (c (asdf:component-name system))))))
 
 
 (defslyfun list-asdf-systems ()
@@ -111,6 +119,7 @@ already knows."
   (unique-string-list
    (list-all-systems-known-to-asdf)
    (list-all-systems-in-central-registry)))
+
 
 (defslyfun asdf-system-files (name)
   (let* ((system (asdf:find-system name))
@@ -151,23 +160,289 @@ already knows."
    ;; If we couldn't find an already defined system,
    ;; try finding a system that's named like BUFFER-PACKAGE-NAME.
    (loop with package = (guess-buffer-package buffer-package-name)
-         for name in (slynk::package-names package)
-         for system = (asdf:find-system (asdf::coerce-name name) nil)
-         when (and system
-                   (or (not file)
-                       (pathname-system file)))
-         return (asdf:component-name system))))
+      for name in (slynk::package-names package)
+      for system = (asdf:find-system (asdf::coerce-name name) nil)
+      when (and system
+                (or (not file)
+                    (pathname-system file)))
+      return (asdf:component-name system))))
 
 
 (defslyfun delete-system-fasls (name)
   (let ((removed-count
          (loop for file in (asdf-component-output-files
                             (asdf:find-system name))
-               when (probe-file file)
-               count it
-               and
-               do (delete-file file))))
+            when (probe-file file)
+            count it
+            and
+            do (delete-file file))))
     (format nil "~d file~:p ~:*~[were~;was~:;were~] removed" removed-count)))
+
+
+
+;; (defun stack ()
+;;   (loop for frame = (sb-di:frame-down (sb-di:top-frame))
+;;           then (sb-di:frame-down frame)
+;;         while frame
+;;         collect frame))
+
+
+(defun collect-notes (function interactive)
+  "Includes additional asdf specific logic from `slynk::collect-notes`"
+  (let ((notes '()))
+    ;; Filter unbound-variable errors that have a corresponding undefined-variable warning.
+    ;; The undefined-variable warning provides a better warning with a precise source error
+    ;; location (at least on SBCL)
+    (flet ((redundant-note-p (note)
+             (when (eq (getf note :type) 'unbound-variable)
+               (let* ((message (getf note :message))
+                      (start 13) ;; "The variable "
+                      (end (search " is unbound" message))
+                      (var-name (subseq message start end)))
+                 (find-if (lambda (prev-note)
+                            (let ((type (getf prev-note :type))
+                                  (message (getf prev-note :message)))
+                              (and (eq type 'simple-warning)
+                                   (search var-name message))))
+                          notes))))
+           (error-p (c) (typep (slynk-backend:original-condition c) 'error)))
+      (multiple-value-bind (result seconds)
+          (handler-bind ((slynk::compiler-condition
+                          (lambda (c)
+                            (let ((note (make-compiler-note c)))
+                              (when note
+                                (push note notes)))
+                            (when (and (error-p c) (not interactive)) ;; For warnings, we do not need to restart
+                              ;; We may be loading a system in which case we would
+                              ;; have an accept restart that we can use to continue
+                              ;; compilation
+                              (let ((accept (find-restart 'asdf/action:accept)))
+                                (if accept
+                                    (invoke-restart accept)
+                                    (invoke-restart 'abort)))))))
+            (slynk::measure-time-interval
+             (lambda ()
+               ;; To report location of error-signaling toplevel forms
+               ;; for errors in EVAL-WHEN or during macroexpansion.
+               (restart-case (multiple-value-list (funcall function))
+                 (abort () :report "Abort compilation." (list nil)))
+               )))
+        (destructuring-bind (successp &optional loadp faslfile) result
+          (let ((faslfile (etypecase faslfile
+                            (null nil)
+                            (pathname (pathname-to-filename faslfile)))))
+            (slynk::make-compilation-result :notes (remove-if #'redundant-note-p notes)
+                                            :duration seconds
+                                            :successp (if successp t)
+                                            :loadp (if loadp t)
+                                            :faslfile faslfile)))))))
+
+
+(defvar *asdf-condition-types*
+  '(;; System definition related
+    asdf/parse-defsystem:bad-system-name
+    asdf:load-system-definition-error
+    asdf/plan::dependency-not-done
+    asdf:system-definition-error
+    uiop/lisp-build:compile-file-error
+    uiop/lisp-build:compile-warned-warning))
+
+
+(defun asdf-condition-p (condition)
+  (member (type-of condition) *asdf-condition-types*))
+
+
+(defun make-compiler-note (condition)
+  "Make a compiler note data structure from a compiler-condition."
+  ;;(declare (type compiler-condition condition))
+  (if (asdf-condition-p (original-condition condition))
+      (make-asdf-note (original-condition condition))
+      (unless (member (severity condition) '(:redefinition))
+        (list* :message (message condition)
+               :severity (severity condition)
+               ;; MG: If we were unable to get the precise source location, replace with
+               ;; *current-source-file* which we dynamically bound around asdf:load*
+               :location (replace-location-if-error (location condition)) 
+               :references (references condition)
+               :type (type-of (original-condition condition))
+               :asdf nil
+               (let ((s (source-context condition)))
+                 (if s (list :source-context s)))))))
+
+
+(defun replace-location-if-error (location)
+  (if (and (eq (car location) :error)
+           *current-source-file*)
+      (slynk-backend:make-location
+       `(:file ,(namestring (asdf:component-pathname *current-source-file*)))
+       `(:position 0))
+      location))
+
+
+(defun make-asdf-note (condition)
+  (etypecase condition
+    ((or asdf:load-system-definition-error
+         asdf:system-definition-error)
+     (let ((message (format nil "~A" (asdf/find-system:error-condition condition))))
+       ;; Hack for now. Clobber asdf messages in deps. Instead we should extract the
+       ;; file buffer and delegate to calling code to clobber irrelevant errors
+       (unless (search "/quicklisp" message)
+         (list* :message message
+                :severity :error
+                :location nil
+                ;;(parse-condition-location ;;(asdf/find-system:error-condition condition))
+                :references nil
+                :type (type-of condition)
+                :asdf t
+                ))))
+    ;; Clobber for now
+    ((or asdf/parse-defsystem:bad-system-name
+         asdf/plan::dependency-not-done
+         uiop/lisp-build:compile-warned-warning ;; "Lisp compilation had style-warnings while compiling ..."
+         )
+     nil)
+    (uiop/lisp-build:compile-file-error nil)))
+
+
+
+(defun parse-condition-location (condition)
+  "Inspect the class of a given CONDITION. If it includes a slot with the name LOCATION
+return it if it is of the form (:file FILENAME :pos NUMBER)"
+  (loop for slot in (slynk-mop:class-direct-slots (class-of condition))
+     for name = (slynk-mop:slot-definition-name slot)
+     when (string-equal name "LOCATION") :do
+       (return-from parse-condition-location
+         (slynk-mop:slot-value-using-class  (class-of condition) condition slot))))
+
+
+(defslyfun compile-files-for-flymake (filenames)
+  (let (;; Muffle compilation
+        (*standard-output* (make-string-output-stream))
+        (*error-output* (make-string-output-stream)))
+    `(:compilation-result 
+      ,(mapcan #'(lambda (filename) (cadr (slynk:compile-file-for-emacs filename nil))) filenames))))
+
+
+
+(defvar *current-system-buffers*
+  :documentation "List of current open sly buffers. We call load-source-op 
+on these directly to improve load-time error messages")
+
+
+(defmethod asdf:perform :around ((o asdf:load-op) (c asdf:cl-source-file))
+  (let ((*current-source-file* c))
+    (call-next-method)))
+
+
+;; (defmethod asdf/plan:record-dependency :around (plan operation component)
+;;   ;; load-op provides significantly worse debugging information as it involves
+;;   ;; loading fasls rather than the source code directly. On SBCL, loading a fasl
+;;   ;; will fail to capture the context for top-level errors.
+;;   ;;
+;;   ;; e.g
+;;   ;; (setf undefined-var 2) ;; Throws an error on load, but source context is NIL
+;;   ;; 
+;;   ;; This prevents us
+;;   ;; from being able to given a line number for the error. To get around this,
+;;   ;; we keep track of a list of *CURRENT-SYSTEM-BUFFERS*
+;;   (let ((*current-component* component))
+;;     (let ((op (if (typep operation 'asdf:load-op)
+;;                   (asdf:make-operation 'asdf:load-source-op)
+;;                   operation)))
+;;       (call-next-method plan op component))))
+
+
+(defun make-relative-pathname (pathname)
+  (make-pathname
+   :name (pathname-name pathname)
+   :type (pathname-type pathname)
+   :directory (cons :relative (cdr (pathname-directory pathname)))))
+
+
+(defun flymake-fasl-directory ()
+  (let ((pathname (merge-pathnames  ".slynk/asdf/fasl/" (user-homedir-pathname))))
+    (ensure-directories-exist pathname)
+    pathname))
+
+
+(defun make-output-translation-function ()
+  (lambda (x)
+    (let ((pathname (merge-pathnames 
+                     (make-relative-pathname x)
+                     (flymake-fasl-directory))))
+      ;;(format t "Compile it! ~A~%" pathname)
+      pathname)))
+
+
+(defslyfun remove-flymake-fasls ()
+  ;;(uiop:delete-directory-tree (flymake-fasl-directory) :validate t)
+  nil)
+
+(defslyfun compile-system-for-flymake (name buffers)
+  ;; Bad things happen because we wind up loading slynk twice
+  (when (search "slynk" name)
+    (return-from compile-system-for-flymake))
+  ;; Muffle compilation
+  ;;(uiop:delete-directory-tree (flymake-fasl-directory) :validate t)
+  (let ((*standard-output* (make-string-output-stream))
+        (*error-output* (make-string-output-stream))
+        (asdf/driver:*output-translation-function*
+         (lambda (x)
+           (let ((pathname (merge-pathnames 
+                            (make-relative-pathname x)
+                            (flymake-fasl-directory))))
+             pathname))))
+    
+    (check-compilation-errors-for-system name buffers)))
+
+
+(defun check-compilation-errors-for-system (system buffers)
+  (let ((stream (make-string-output-stream)))
+    (spawn-compilation-process-for-system system buffers :stream stream)
+    (parse-compilation-result (get-output-stream-string stream))))
+
+
+(defun parse-compilation-result (string)
+  (handler-bind ((error
+                  (lambda (e)
+                    (declare (ignore e))
+                    ;; We may attempt to intern error types of packages that
+                    ;; do not exist in the current context (e.g.: ALEXANDRIA.DEV.0::SIMPLE-STYLE-WARNING)
+                    ;; This will capture that error and instead use the current package
+                    (invoke-restart (fourth (compute-restarts)))
+                    )))
+    (read-from-string (subseq string (search "(:COMPILATION-RESULT" string)))))
+
+
+(defun spawn-compilation-process-for-system (system buffers &key stream)
+  (uiop/driver:run-program
+   `("sbcl" "--non-interactive"
+            ;; Transfer the current value for the *central-repository*. This includes the current
+            ;; location of `slynk` files allowing us to asdf:load-system slynk in our compilation process
+            "--eval" ,(with-output-to-string (s)
+                        (print-object `(setf asdf:*central-registry* ',asdf:*central-registry*) s))
+            "--eval" "(asdf:load-system \"slynk\")"
+            "--eval" "(asdf:load-system \"slynk-asdf\")"
+            "--eval" ,(with-output-to-string (s)
+                        (print-object `(setf slynk-asdf:*current-system-buffers* ',buffers) s))
+            "--eval" "(in-package :slynk-asdf)"
+            "--eval" ,(with-output-to-string (s)
+                        (print-object
+                         ;; Send output to *standard-output* for parsing later
+                         `(progn
+                            (format *standard-output* "~%") ;; Ensure new line
+                            (print-object
+                             (let ((asdf/driver:*output-translation-function*
+                                    (slynk-asdf:make-output-translation-function))
+                                   (*standard-output* (make-string-output-stream)))
+                               (slynk-asdf::operate-on-system-for-emacs ,system 'load-op :force t))
+                             *standard-output*))
+                         s)))
+   :error-output *standard-output*
+   :output stream))
+
+
+
 
 
 ;;; Internal
@@ -176,12 +451,13 @@ already knows."
   (asdf:version-satisfies (asdf:asdf-version) version))
 
 
-(asdefs "2.15"
+(asdefs
+ "2.15"
  (defvar *wild* #-cormanlisp :wild #+cormanlisp "*")
 
  (defun collect-asds-in-directory (directory collect)
    (map () collect (directory-asd-files directory)))
-        
+ 
  (defun register-asd-directory (directory &key recurse exclude collect)
    (if (not recurse)
        (collect-asds-in-directory directory collect)
@@ -189,21 +465,22 @@ already knows."
         directory :exclude exclude :collect collect))))
 
 
-(asdefs "2.16"
+(asdefs
+ "2.16"
  (defun load-sysdef (name pathname)
    (declare (ignore name))
    (let ((package (asdf::make-temporary-package)))
      (unwind-protect
           (let ((*package* package)
                 (*default-pathname-defaults*
-                  (asdf::pathname-directory-pathname
-                   (translate-logical-pathname pathname))))
+                 (asdf::pathname-directory-pathname
+                  (translate-logical-pathname pathname))))
             (asdf::asdf-message
              "~&; Loading system definition from ~A into ~A~%" ;
              pathname package)
             (load pathname))
-     (delete-package package))))
-        
+       (delete-package package))))
+ 
  (defun directory* (pathname-spec &rest keys &key &allow-other-keys)
    (apply 'directory pathname-spec
           (append keys
@@ -221,11 +498,12 @@ already knows."
                            '(:resolve-symlinks nil)))))))
 
 
-(asdefs "2.17"
+(asdefs
+ "2.17"
  (defun collect-sub*directories-asd-files
      (directory &key
-                (exclude asdf::*default-source-registry-exclusions*)
-                collect)
+                  (exclude asdf::*default-source-registry-exclusions*)
+                  collect)
    (asdf::collect-sub*directories
     directory
     (constantly t)
@@ -240,64 +518,66 @@ already knows."
  (defun filter-logical-directory-results (directory entries merger)
    (if (typep directory 'logical-pathname)
        (loop for f in entries
-             when
-             (if (typep f 'logical-pathname)
-                 f
-                 (let ((u (ignore-errors (funcall merger f))))
-                   (and u
-                        (equal (ignore-errors (truename u))
-                               (truename f))
-                        u)))
-             collect it)
+          when
+            (if (typep f 'logical-pathname)
+                f
+                (let ((u (ignore-errors (funcall merger f))))
+                  (and u
+                       (equal (ignore-errors (truename u))
+                              (truename f))
+                       u)))
+          collect it)
        entries))
 
  (defun directory-asd-files (directory)
    (directory-files directory asdf::*wild-asd*)))
 
 
-(asdefs "2.19"
-    (defun subdirectories (directory)
-      (let* ((directory (asdf::ensure-directory-pathname directory))
-             #-(or abcl cormanlisp xcl)
-             (wild (asdf::merge-pathnames*
-                    #-(or abcl allegro cmu lispworks sbcl scl xcl)
-                    asdf::*wild-directory*
-                #+(or abcl allegro cmu lispworks sbcl scl xcl) "*.*"
-                directory))
-             (dirs
-               #-(or abcl cormanlisp xcl)
-               (ignore-errors
-                (directory* wild . #.(or #+clozure '(:directories t :files nil)
-                                         #+mcl '(:directories t))))
-               #+(or abcl xcl) (system:list-directory directory)
-               #+cormanlisp (cl::directory-subdirs directory))
-             #+(or abcl allegro cmu lispworks sbcl scl xcl)
-             (dirs (loop for x in dirs
-                         for d = #+(or abcl xcl) (extensions:probe-directory x)
-                         #+allegro (excl:probe-directory x)
-                         #+(or cmu sbcl scl) (asdf::directory-pathname-p x)
-                         #+lispworks (lw:file-directory-p x)
-                         when d collect #+(or abcl allegro xcl) d
-                         #+(or cmu lispworks sbcl scl) x)))
-        (filter-logical-directory-results
-         directory dirs
-         (let ((prefix (or (normalize-pathname-directory-component
-                            (pathname-directory directory))
-                           ;; because allegro 8.x returns NIL for #p"FOO:"
-                           '(:absolute))))
-           (lambda (d)
-             (let ((dir (normalize-pathname-directory-component
-                         (pathname-directory d))))
-               (and (consp dir) (consp (cdr dir))
-                    (make-pathname
-                     :defaults directory :name nil :type nil :version nil
-                     :directory
-                     (append prefix
-                             (make-pathname-component-logical
-                              (last dir))))))))))))
+(asdefs
+ "2.19"
+ (defun subdirectories (directory)
+   (let* ((directory (asdf::ensure-directory-pathname directory))
+          #-(or abcl cormanlisp xcl)
+          (wild (asdf::merge-pathnames*
+                 #-(or abcl allegro cmu lispworks sbcl scl xcl)
+                 asdf::*wild-directory*
+                 #+(or abcl allegro cmu lispworks sbcl scl xcl) "*.*"
+                 directory))
+          (dirs
+           #-(or abcl cormanlisp xcl)
+           (ignore-errors
+             (directory* wild . #.(or #+clozure '(:directories t :files nil)
+                                      #+mcl '(:directories t))))
+           #+(or abcl xcl) (system:list-directory directory)
+           #+cormanlisp (cl::directory-subdirs directory))
+          #+(or abcl allegro cmu lispworks sbcl scl xcl)
+          (dirs (loop for x in dirs
+                   for d = #+(or abcl xcl) (extensions:probe-directory x)
+                     #+allegro (excl:probe-directory x)
+                     #+(or cmu sbcl scl) (asdf::directory-pathname-p x)
+                     #+lispworks (lw:file-directory-p x)
+                   when d collect #+(or abcl allegro xcl) d
+                     #+(or cmu lispworks sbcl scl) x)))
+     (filter-logical-directory-results
+      directory dirs
+      (let ((prefix (or (normalize-pathname-directory-component
+                         (pathname-directory directory))
+                        ;; because allegro 8.x returns NIL for #p"FOO:"
+                        '(:absolute))))
+        (lambda (d)
+          (let ((dir (normalize-pathname-directory-component
+                      (pathname-directory d))))
+            (and (consp dir) (consp (cdr dir))
+                 (make-pathname
+                  :defaults directory :name nil :type nil :version nil
+                  :directory
+                  (append prefix
+                          (make-pathname-component-logical
+                           (last dir))))))))))))
 
 
-(asdefs "2.21"
+(asdefs
+ "2.21"
  (defun component-loaded-p (c)
    (and (gethash 'load-op (asdf::component-operation-times
                            (asdf::find-component c nil))) t))
@@ -329,7 +609,8 @@ already knows."
     :version (make-pathname-component-logical (pathname-version pathname)))))
 
 
-(asdefs "2.22"
+(asdefs
+ "2.22"
  (defun directory-files (directory &optional (pattern asdf::*wild-file*))
    (let ((dir (pathname directory)))
      (when (typep dir 'logical-pathname)
@@ -341,7 +622,7 @@ already knows."
                 pattern directory))
        (setf pattern (make-pathname-logical pattern (pathname-host dir))))
      (let ((entries (ignore-errors
-                     (directory* (asdf::merge-pathnames* pattern dir)))))
+                      (directory* (asdf::merge-pathnames* pattern dir)))))
        (filter-logical-directory-results
         directory entries
         (lambda (f)
@@ -354,7 +635,8 @@ already knows."
                                    (pathname-version f)))))))))
 
 
-(asdefs "2.26.149"
+(asdefs
+ "2.26.149"
  (defmethod component-relative-pathname ((system asdf:system))
    (asdf::coerce-pathname
     (and (slot-boundp system 'asdf::relative-pathname)
@@ -414,14 +696,38 @@ already knows."
 (defmethod xref-doit ((type (eql :depends-on)) thing)
   (when (typep thing '(or string symbol))
     (loop for dependency in (who-depends-on thing)
-          for asd-file = (asdf:system-source-file dependency)
-          when asd-file
-            collect (list dependency
-                        (slynk-backend:make-location
-                         `(:file ,(namestring asd-file))
-                         `(:position 1)
-                         `(:snippet ,(format nil "(defsystem :~A" dependency)
-                           :align t))))))
+       for asd-file = (asdf:system-source-file dependency)
+       when asd-file
+       collect (list dependency
+                     (slynk-backend:make-location
+                      `(:file ,(namestring asd-file))
+                      `(:position 1)
+                      `(:snippet ,(format nil "(defsystem :~A" dependency)
+                                 :align t))))))
+
+(defun foo (a)
+  (bar a))
+
+(defun foo2 (a)
+  (step
+   (bar a)))
+
+(defun bar (a)
+  (break)
+  (format t "~A" (+ 1 a)))
+
+
+(defun breakpoint-add (function)
+  "Warning! SBCL only"
+  ;; Or should we be recompiling function with a (break) in the proper location?
+  (labels ((call-with-breakpoint (func &rest args) (step (apply func args))))
+    (unless (sb-int:encapsulated-p function 'breakpoint)
+      (sb-int:encapsulate function 'breakpoint #'call-with-breakpoint))))
+
+
+(defun breakpoint-remove (function)
+  (when (sb-int:encapsulated-p function 'breakpoint)
+    (sb-int:unencapsulate function 'breakpoint)))
 
 
 (defun operate-on-system (system-name operation-name &rest keyword-args)
@@ -429,13 +735,12 @@ already knows."
 The KEYWORD-ARGS are passed on to the operation.
 Example:
 \(operate-on-system \"cl-ppcre\" 'compile-op :force t)"
-  (handler-case
-      (slynk-backend:with-compilation-hooks ()
-        (apply #'asdf:operate (asdf-operation operation-name)
-               system-name keyword-args)
-        t)
-    ((or asdf:compile-error #+asdf3 asdf/lisp-build:compile-file-error)
-      () nil)))
+  ;;(handler-case
+  (slynk-backend:with-compilation-hooks ()
+    (apply #'asdf:operate (asdf-operation operation-name)
+           system-name keyword-args)))
+;;((or asdf:compile-error #+asdf3 asdf/lisp-build:compile-file-error)
+;; () nil)))
 
 
 (defun make-operation (x)
@@ -448,9 +753,9 @@ Example:
 (defmethod asdf:operation-done-p :around
     ((operation asdf:compile-op)
      component)
-    (unless (eql *recompile-system*
-                 (asdf:component-system component))
-      (call-next-method)))
+  (unless (eql *recompile-system*
+               (asdf:component-system component))
+    (call-next-method)))
 
 
 (defun unique-string-list (&rest lists)
@@ -461,24 +766,24 @@ Example:
   (if (and #+asdf3 (typep component 'asdf:package-inferred-system))
       (asdf-inferred-system-files component ".lisp")
       (while-collecting (c)
-        (labels ((f (x)
-                   (typecase x
-                     (asdf:source-file (c (asdf:component-pathname x)))
-                     (asdf:module (map () #'f (asdf:module-components x))))))
-          (f component)))))
+                        (labels ((f (x)
+                                   (typecase x
+                                     (asdf:source-file (c (asdf:component-pathname x)))
+                                     (asdf:module (map () #'f (asdf:module-components x))))))
+                          (f component)))))
 
 
 (defun asdf-component-output-files (component)
   (if (and #+asdf3 (typep component 'asdf:package-inferred-system))
       (asdf-inferred-system-files component ".fasl")
       (while-collecting (c)
-        (labels ((f (x)
-                   (typecase x
-                     (asdf:source-file
-                      (map () #'c
-                           (asdf:output-files (make-operation 'asdf:compile-op) x)))
-                     (asdf:module (map () #'f (asdf:module-components x))))))
-          (f component)))))
+                        (labels ((f (x)
+                                   (typecase x
+                                     (asdf:source-file
+                                      (map () #'c
+                                           (asdf:output-files (make-operation 'asdf:compile-op) x)))
+                                     (asdf:module (map () #'f (asdf:module-components x))))))
+                          (f component)))))
 
 
 (defun asdf-inferred-system-files (system ending)
@@ -486,10 +791,10 @@ Example:
     (flet ((dep-pathname (dep)
              (let ((name (asdf:component-name dep)))
                (parse-namestring (concatenate
-                'string
-                (namestring system-pathname )
-                (subseq name (1+ (position #\/ name)))
-                ending)))))
+                                  'string
+                                  (namestring system-pathname )
+                                  (subseq name (1+ (position #\/ name)))
+                                  ending)))))
       (mapcar #'dep-pathname (asdf-inferred-system-deps system)))))
 
 

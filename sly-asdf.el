@@ -3,7 +3,7 @@
 ;; Version: 0.1
 ;; URL: https://github.com/mmgeorge/sly-asdf
 ;; Keywords: languages, lisp, sly, asdf
-;; Package-Requires: ((emacs "24.3")(sly "1.0.0-beta2"))
+;; Package-Requires: ((emacs "24.3")(sly "1.0.0-beta2")(popup "0.5.3"))
 ;; Maintainer: Matt George <mmge93@gmail.com>
 ;;
 ;; This file is free software; you can redistribute it and/or modify
@@ -32,11 +32,13 @@
 (require 'sly)
 (require 'cl-lib)
 (require 'grep)
-
+(require 'sly-asdf-flymake)
 
 (defvar sly-mrepl-shortcut-alist) ;; declared in sly-mrepl
+
 (defvar sly-asdf-find-system-file-max-depth 10
   "Max recursive depth for finding an asd system definition from the current directory.")
+
 (defvar sly-asdf-shortcut-alist
   '(("load-system" . sly-asdf-load-system)
     ("reload-system" . sly-asdf-reload-system)
@@ -55,6 +57,9 @@
   (:license "GPL")
   (:slynk-dependencies slynk-asdf)
   (:on-load
+   (add-hook 'sly-connected-hook
+             ;; MG: Investigate race, due to when ASDF loads?
+             (lambda () (run-with-idle-timer .5 nil #'sly-asdf-flymake)))
    (setq sly-mrepl-shortcut-alist
          (append sly-mrepl-shortcut-alist sly-asdf-shortcut-alist))))
 
@@ -66,7 +71,7 @@
 Default system name is taken from first file matching *.asd in current
 buffer's working directory"
   (interactive (list (sly-asdf-read-system-name)))
-  (sly-asdf-oos system 'load-op))
+  (sly-asdf-oos system 'load-op :force t))
 
 
 (defun sly-asdf-reload-system (system)
@@ -80,7 +85,16 @@ buffer's working directory"
   (sly-eval-async
       `(slynk-asdf:reload-system ,system)
     #'(lambda (result)
-        (sly-compilation-finished result (current-buffer)))))
+        (sly-compilation-finished result (current-buffer))
+        (run-hooks 'sly-asdf--after-oos-hook))))
+
+
+(defun sly-asdf-compile-system (&optional system)
+  "Compile and load an ASDF SYSTEM.
+Default system name is taken from first file matching *.asd in current
+buffer's working directory"
+  (interactive (list (sly-asdf-read-system-name)))
+  (sly-asdf-oos system 'compile-op))
 
 
 (defun sly-asdf-save-system (system)
@@ -196,8 +210,8 @@ DELIMITED is optional.  Includes the base system and all other systems it depend
   "Delete FASLs produced by compiling a system with NAME."
   (interactive (list (sly-asdf-read-system-name)))
   (sly-eval-async
-   `(slynk-asdf:delete-system-fasls ,name)
-   'message))
+      `(slynk-asdf:delete-system-fasls ,name)
+    'message))
 
 
 (defun sly-asdf-who-depends-on (sys-name)
@@ -263,11 +277,14 @@ in the directory of the current buffer."
                        'sly-asdf-system-history default-value))))
 
 
-(defun sly-asdf-find-current-system ()
+(cl-defun sly-asdf-find-current-system (&optional (buffer (car (sly-asdf--current-lisp-buffers))))
   "Find the name of the current asd system."
-  (let ((system-file (sly-asdf-find-system-file default-directory)))
-    (when system-file
-      (file-name-base system-file))))
+  (when buffer
+    (let* ((buffer-file-name (buffer-file-name buffer ))
+           (directory (file-name-directory buffer-file-name))
+           (system-file (sly-asdf-find-system-file directory)))
+      (when system-file
+        (file-name-base system-file)))))
 
 
 (cl-defun sly-asdf-find-system-file (directory &optional (depth sly-asdf-find-system-file-max-depth))
@@ -302,7 +319,8 @@ in the directory of the current buffer."
   (sly-eval-async
       `(slynk-asdf:operate-on-system-for-emacs ,system ',operation ,@keyword-args)
     #'(lambda (result)
-        (sly-compilation-finished result (current-buffer)))))
+        (sly-compilation-finished result (current-buffer))
+        (run-hooks 'sly-asdf--after-oos-hook))))
 
 
 ;;;###autoload
