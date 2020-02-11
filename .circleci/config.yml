@@ -7,9 +7,6 @@ jobs:
       - checkout:
           path: ~/common-lisp/sly-asdf
       - run:
-          name: Update
-          command: cd ~/common-lisp/sly-asdf && git pull
-      - run:
           name: Download sly
           command: git clone https://github.com/joaotavora/sly ~/common-lisp/sly --depth 1
       - run:
