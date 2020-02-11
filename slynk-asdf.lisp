@@ -22,6 +22,16 @@
 (defvar *recompile-system* nil)
 (defvar *pathname-component* (make-hash-table :test 'equal))
 (defvar *current-source-file* nil)
+(defvar *asdf-condition-types*
+  '(;; System definition related
+    asdf/parse-defsystem:bad-system-name
+    asdf:load-system-definition-error
+    ;; asdf/plan::dependency-not-done
+    uiop/lisp-build:compile-file-error
+    uiop/lisp-build:compile-warned-warning))
+(defvar *current-system-buffers*
+  :documentation "List of current open sly buffers. We call load-source-op 
+on these directly to improve load-time error messages")
 
 
 ;;; Macros
@@ -179,7 +189,6 @@ already knows."
     (format nil "~d file~:p ~:*~[were~;was~:;were~] removed" removed-count)))
 
 
-
 ;; (defun stack ()
 ;;   (loop for frame = (sb-di:frame-down (sb-di:top-frame))
 ;;           then (sb-di:frame-down frame)
@@ -225,8 +234,7 @@ already knows."
                ;; To report location of error-signaling toplevel forms
                ;; for errors in EVAL-WHEN or during macroexpansion.
                (restart-case (multiple-value-list (funcall function))
-                 (abort () :report "Abort compilation." (list nil)))
-               )))
+                 (abort () :report "Abort compilation." (list nil))))))
         (destructuring-bind (successp &optional loadp faslfile) result
           (let ((faslfile (etypecase faslfile
                             (null nil)
@@ -236,16 +244,6 @@ already knows."
                                             :successp (if successp t)
                                             :loadp (if loadp t)
                                             :faslfile faslfile)))))))
-
-
-(defvar *asdf-condition-types*
-  '(;; System definition related
-    asdf/parse-defsystem:bad-system-name
-    asdf:load-system-definition-error
-    asdf/plan::dependency-not-done
-    asdf:system-definition-error
-    uiop/lisp-build:compile-file-error
-    uiop/lisp-build:compile-warned-warning))
 
 
 (defun asdf-condition-p (condition)
@@ -284,22 +282,22 @@ already knows."
     ((or asdf:load-system-definition-error
          asdf:system-definition-error)
      (let ((message (format nil "~A" (asdf/find-system:error-condition condition))))
-       ;; Hack for now. Clobber asdf messages in deps. Instead we should extract the
-       ;; file buffer and delegate to calling code to clobber irrelevant errors
+       ;; Clobber asdf messages in quicklisp deps. Better would be to extract the
+       ;; file buffer and delegate to the calling code to clobber irrelevant errors
        (unless (search "/quicklisp" message)
          (list* :message message
                 :severity :error
                 :location nil
-                ;;(parse-condition-location ;;(asdf/find-system:error-condition condition))
                 :references nil
                 :type (type-of condition)
-                :asdf t
-                ))))
+                :asdf t))))
     ;; Clobber for now
     ((or asdf/parse-defsystem:bad-system-name
-         asdf/plan::dependency-not-done
-         uiop/lisp-build:compile-warned-warning ;; "Lisp compilation had style-warnings while compiling ..."
-         )
+         ;; MG: asdf/plan::dependency-not-done requires 3.3.1.4. 
+         ;; Be sure to also uncomment the corresponding statement in *asdf-condition-types*
+         ;; https://github.com/fare/asdf/commit/6cba911f89e15bcde00cced5248190b4d747ab90
+         ;; asdf/plan::dependency-not-done
+         uiop/lisp-build:compile-warned-warning) ;; "Lisp compilation had style-warnings while compiling ..."
      nil)
     (uiop/lisp-build:compile-file-error nil)))
 
@@ -322,11 +320,6 @@ return it if it is of the form (:file FILENAME :pos NUMBER)"
     `(:compilation-result 
       ,(mapcan #'(lambda (filename) (cadr (slynk:compile-file-for-emacs filename nil))) filenames))))
 
-
-
-(defvar *current-system-buffers*
-  :documentation "List of current open sly buffers. We call load-source-op 
-on these directly to improve load-time error messages")
 
 
 (defmethod asdf:perform :around ((o asdf:load-op) (c asdf:cl-source-file))
@@ -467,20 +460,6 @@ on these directly to improve load-time error messages")
 
 (asdefs
  "2.16"
- (defun load-sysdef (name pathname)
-   (declare (ignore name))
-   (let ((package (asdf::make-temporary-package)))
-     (unwind-protect
-          (let ((*package* package)
-                (*default-pathname-defaults*
-                 (asdf::pathname-directory-pathname
-                  (translate-logical-pathname pathname))))
-            (asdf::asdf-message
-             "~&; Loading system definition from ~A into ~A~%" ;
-             pathname package)
-            (load pathname))
-       (delete-package package))))
- 
  (defun directory* (pathname-spec &rest keys &key &allow-other-keys)
    (apply 'directory pathname-spec
           (append keys
