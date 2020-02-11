@@ -1,0 +1,14 @@
+version: 2
+jobs:
+  build:
+    docker:
+      - image: mmgeorge/sbcl:latest
+    steps:
+      - checkout:
+          path: ~/common-lisp/sly-asdf
+      - run:
+          name: Update
+          command: cd ~/common-lisp/sly-asdf && git pull
+      - run:
+          name: Load package
+          command:  sbcl --eval '(asdf:load-system "slynk-asdf")' --non-interactive
