@@ -1,4 +1,4 @@
- [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)     [![MELPA](http://melpa.org/packages/sly-asdf-badge.svg)](http://melpa.org/#/sly-asdf)
+ [![MELPA](http://melpa.org/packages/sly-asdf-badge.svg)](http://melpa.org/#/sly-asdf)[![CircleCI](https://circleci.com/gh/mmgeorge/sly-asdf/tree/master.svg?style=svg)](https://circleci.com/gh/mmgeorge/sly-asdf/tree/master)[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
  
 ## Sly-asdf
 
