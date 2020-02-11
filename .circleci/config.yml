@@ -15,4 +15,8 @@ jobs:
       - run:
           name: Check log for undefined
           # SLYNK::CLASSIFY-SYMBOL error appears to be unrelated sly-asdf
-          command: ! (grep -v SLYNK::CLASSIFY-SYMBOL log.txt | grep undefined)
+          command: ! grep -v SLYNK::CLASSIFY-SYMBOL log.txt | grep undefined
+      - run:
+          name: Check status code
+          command: echo $?
+      
