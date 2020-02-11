@@ -2,7 +2,7 @@ version: 2
 jobs:
   build:
     docker:
-      - image: mmgeorge/sbcl:latest
+      - image: fukamachi/sbcl:1.3.20-debian
     steps:
       - checkout:
           path: ~/common-lisp/sly-asdf
