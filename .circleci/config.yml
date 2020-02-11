@@ -14,4 +14,7 @@ jobs:
           command: git clone https://github.com/joaotavora/sly ~/common-lisp/sly --depth 1
       - run:
           name: Load package
-          command:  sbcl --eval '(asdf:load-system "slynk-asdf")' --non-interactive
+          command:  sbcl --eval '(asdf:load-system "slynk-asdf")' --non-interactive | tee log.txt
+      - run:
+          name: Check log for undefined
+          command: ! grep undefined log.txt
