@@ -4,6 +4,8 @@ on: [push, pull_request]
 
 jobs:
   default:
+    runs-on: ubuntu-latest
+
     container: mmgeorge/sbcl-debian:1.4.2
 
     steps:
