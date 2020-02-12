@@ -1,11 +1,16 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - master
+  pull_request:
 
 jobs:
   default:
+    # Github actions change the HOME default, breaking ASDF/quicklisp
     env:
-      HOME: /root
+      HOME: /root 
 
     runs-on: ubuntu-latest
 
@@ -22,5 +27,3 @@ jobs:
       run: sbcl --eval '(asdf:load-system "slynk-asdf")' --non-interactive | tee log.txt
     - name: Echo
       run: cat log.txt
-    - name: Echo home
-      run: echo $HOME
