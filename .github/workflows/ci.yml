@@ -4,6 +4,8 @@ on: [push, pull_request]
 
 jobs:
   default:
+    env:
+      HOME: /root
     runs-on: ubuntu-latest
 
     container:
