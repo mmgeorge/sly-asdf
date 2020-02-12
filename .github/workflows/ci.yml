@@ -16,3 +16,5 @@ jobs:
         git clone https://github.com/joaotavora/sly ~/common-lisp/sly --depth 1
     - name: Load package
       run: sbcl --eval '(asdf:load-system "slynk-asdf")' --non-interactive | tee log.txt
+    - name: Echo
+      run: cat log.txt
