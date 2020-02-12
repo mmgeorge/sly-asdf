@@ -6,12 +6,11 @@ jobs:
   default:
     env:
       HOME: /root
+
     runs-on: ubuntu-latest
 
     container:
       image: mmgeorge/sbcl-debian:1.4.2
-      env:
-        HOME: /root
 
     steps:
     #- uses: actions/checkout@v2
