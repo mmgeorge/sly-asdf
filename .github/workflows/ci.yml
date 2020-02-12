@@ -29,4 +29,5 @@ jobs:
     - name: Print log
       run: cat $ARTIFACTS/log.txt
     - name: Check for undefined symbols
-      run: ! grep undefined $ARTIFACTS/log.txt
+      run: |
+        ! grep undefined $ARTIFACTS/log.txt
