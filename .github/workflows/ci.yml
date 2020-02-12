@@ -3,22 +3,14 @@ name: CI
 on: [push, pull_request]
 
 jobs:
-  build:
-
-    runs-on: ubuntu-latest
+  default:
+    container: mmgeorge/sbcl-debian:1.4.2
 
     steps:
     #- uses: actions/checkout@v2
-    - name: Checkout repo
-      run: git clone https://github.com/mmgeorge/sly-asdf ~/common-lisp/sly-asdf --depth 1
-    - name: Run a one-line script
-      run: echo Hello, world!
-    - name: Run a multi-line script
+    - name: Checkout
       run: |
-        echo Add other actions to build,
-        echo test, and deploy your project.
-    - name: Fail
-      run: |
-        exit 1
-        
-      
+        git clone https://github.com/mmgeorge/sly-asdf ~/common-lisp/sly-asdf --depth 1
+        git clone https://github.com/joaotavora/sly ~/common-lisp/sly --depth 1
+    - name: Load package
+      run: sbcl --eval '(asdf:load-system "slynk-asdf")' --non-interactive | tee log.txt
