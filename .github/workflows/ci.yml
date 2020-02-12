@@ -25,8 +25,8 @@ jobs:
         git clone https://github.com/mmgeorge/sly-asdf ~/common-lisp/sly-asdf --depth 1
         git clone https://github.com/joaotavora/sly ~/common-lisp/sly --depth 1
     - name: Load package
-      run: sbcl --eval '(asdf:load-system "slynk-asdf")' --non-interactive | tee $ARTIFACTS/log.txt
+      run: sbcl --eval '(asdf:load-system "slynk-asdf")' --non-interactive | tee ~/log.txt
     - name: Check for undefined symbols
-      run: grep undefined $ARTIFACTS/log.txt
+      run: grep undefined ~/log.txt
     - name: cat file
-      run: cat $ARTIFACTS/log.txt
+      run: cat ~/log.txt
