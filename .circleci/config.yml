@@ -16,4 +16,4 @@ jobs:
           name: Check log for undefined
           # SLYNK::CLASSIFY-SYMBOL error appears to be unrelated sly-asdf
           command: |
-            ! grep undefined
+            ! grep undefined log.txt
