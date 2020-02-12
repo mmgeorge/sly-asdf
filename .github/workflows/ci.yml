@@ -21,3 +21,5 @@ jobs:
       run: sbcl --eval '(asdf:load-system "slynk-asdf")' --non-interactive | tee log.txt
     - name: Echo
       run: cat log.txt
+    - name: Echo home
+      run: echo $HOME
