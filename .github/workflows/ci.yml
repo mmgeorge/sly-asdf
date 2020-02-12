@@ -12,6 +12,7 @@ jobs:
     env:
       HOME: /root
       ARTIFACTS: /github/home
+      GITHUB_WORKSPACE: /root/common-lisp
 
     runs-on: ubuntu-latest
 
@@ -19,15 +20,16 @@ jobs:
       image: mmgeorge/sbcl-debian:1.4.2 
 
     steps:
-    #- uses: actions/checkout@v2
+    - uses: actions/checkout@v2
     - name: Checkout
       run: |
-        git clone https://github.com/mmgeorge/sly-asdf ~/common-lisp/sly-asdf --depth 1
+        #git clone https://github.com/mmgeorge/sly-asdf ~/common-lisp/sly-asdf --depth 1
         git clone https://github.com/joaotavora/sly ~/common-lisp/sly --depth 1
     - name: Load package
       run: sbcl --eval '(asdf:load-system "slynk-asdf")' --non-interactive 2>&1 | tee $ARTIFACTS/log.txt
     - name: Print log
       run: cat $ARTIFACTS/log.txt
     - name: Check for undefined symbols
+      # Ignore SLYNK::CLASSIFY-SYMBOL as unrelated to `sly-asdf` (in main sly contrib)
       run: |
         ! grep -v SLYNK::CLASSIFY-SYMBOL $ARTIFACTS/log.txt | grep undefined 
