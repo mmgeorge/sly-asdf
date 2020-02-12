@@ -30,4 +30,4 @@ jobs:
       run: cat $ARTIFACTS/log.txt
     - name: Check for undefined symbols
       run: |
-        ! grep undefined $ARTIFACTS/log.txt
+        ! grep -v SLYNK::CLASSIFY-SYMBOL $ARTIFACTS/log.txt | grep undefined 
