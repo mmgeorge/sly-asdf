@@ -26,5 +26,4 @@ jobs:
     - name: Load package
       run: sbcl --eval '(asdf:load-system "slynk-asdf")' --non-interactive | tee log.txt
     - name: Check for undefined symbols
-      run: |
-        ! grep undefined log.txt
+      run: ! grep undefined log.txt
