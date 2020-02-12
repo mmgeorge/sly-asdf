@@ -10,7 +10,7 @@ jobs:
   load:
     # Github Actions changes the HOME default, breaking ASDF/quicklisp
     env:
-      HOME: /root
+      #HOME: /root
       ARTIFACTS: /github/home
 
     runs-on: ubuntu-latest
