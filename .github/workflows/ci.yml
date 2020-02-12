@@ -15,9 +15,6 @@ jobs:
 
     steps:
     #- uses: actions/checkout@v2
-    - name: Setup ENV
-      run: |
-        cp /home/.sbclrc ~/
     - name: Checkout
       run: |
         git clone https://github.com/mmgeorge/sly-asdf ~/common-lisp/sly-asdf --depth 1
