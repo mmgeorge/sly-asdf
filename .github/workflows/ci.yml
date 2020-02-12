@@ -30,6 +30,8 @@ jobs:
       run: sbcl --userinit $SBCLRC --eval '(asdf:load-system "slynk-asdf")' --non-interactive 2>&1 | tee $ARTIFACTS/log.txt
     - name: Print log
       run: cat $ARTIFACTS/log.txt
+    - name: print sbcl
+      run: ls /home
     - name: Check for undefined symbols
       # Ignore SLYNK::CLASSIFY-SYMBOL as unrelated to `sly-asdf` (in main sly contrib)
       run: |
