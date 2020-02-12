@@ -13,7 +13,7 @@ jobs:
 
     steps:
     #- uses: actions/checkout@v2
-    - run: Setup ENV
+    - name: Setup ENV
       run: |
         export HOME=/home
     - name: Checkout
