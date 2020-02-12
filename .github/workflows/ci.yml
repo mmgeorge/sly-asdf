@@ -1,4 +1,4 @@
-name: CI
+name: ci
 
 on:
   push:
@@ -7,15 +7,15 @@ on:
   pull_request:
 
 jobs:
-  default:
-    # Github actions change the HOME default, breaking ASDF/quicklisp
+  load:
+    # Github Actions changes the HOME default, breaking ASDF/quicklisp
     env:
       HOME: /root 
 
     runs-on: ubuntu-latest
 
     container:
-      image: mmgeorge/sbcl-debian:1.4.2
+      image: mmgeorge/sbcl-debian:1.4.2 
 
     steps:
     #- uses: actions/checkout@v2
@@ -25,5 +25,6 @@ jobs:
         git clone https://github.com/joaotavora/sly ~/common-lisp/sly --depth 1
     - name: Load package
       run: sbcl --eval '(asdf:load-system "slynk-asdf")' --non-interactive | tee log.txt
-    - name: Echo
-      run: cat log.txt
+    - name: Check for undefined symbols
+      run: |
+        ! grep undefined log.txt
