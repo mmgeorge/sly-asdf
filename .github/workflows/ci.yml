@@ -10,7 +10,8 @@ jobs:
   load:
     # Github Actions changes the HOME default, breaking ASDF/quicklisp
     env:
-      HOME: /root 
+      HOME: /root
+      ARTIFACTS: /github/home
 
     runs-on: ubuntu-latest
 
@@ -24,6 +25,8 @@ jobs:
         git clone https://github.com/mmgeorge/sly-asdf ~/common-lisp/sly-asdf --depth 1
         git clone https://github.com/joaotavora/sly ~/common-lisp/sly --depth 1
     - name: Load package
-      run: sbcl --eval '(asdf:load-system "slynk-asdf")' --non-interactive | tee /github/home/log.txt
+      run: sbcl --eval '(asdf:load-system "slynk-asdf")' --non-interactive | tee $ARTIFACTS/log.txt
     - name: Check for undefined symbols
-      run: grep undefined /github/home/log.txt
+      run: grep undefined $ARTIFACTS/log.txt
+    - name: cat file
+      run: cat $ARTIFACTS/log.txt
