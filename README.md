@@ -1,5 +1,5 @@
 [![MELPA](http://melpa.org/packages/sly-asdf-badge.svg)](http://melpa.org/#/sly-asdf)
-![ci](https://github.com/mmgeorge/sly-asdf/workflows/ci/badge.svg)
+[![ci](https://github.com/mmgeorge/sly-asdf/workflows/ci/badge.svg)](https://github.com/mmgeorge/sly-asdf/actions?query=workflow%3Aci)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
  
  
