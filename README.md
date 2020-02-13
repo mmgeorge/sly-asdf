@@ -21,4 +21,3 @@ SLY-ASDF currently supports a very experimental system-aware checker that builds
 ```
 (setq sly-asdf-enable-experimental-syntax-checking t)
 ```
-![syntax-check](https://user-images.githubusercontent.com/16738762/73144381-05fe2f00-405a-11ea-99c6-68e6c4cbb8fd.PNG)
