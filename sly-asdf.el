@@ -85,7 +85,7 @@ buffer's working directory"
   (sly-eval-async
       `(slynk-asdf:reload-system ,system)
     #'(lambda (result)
-        (sly-compilation-finished result (current-buffer))
+        (sly-asdf-oos-finished result (current-buffer))
         (run-hooks 'sly-asdf--after-oos-hook))))
 
 
@@ -319,9 +319,23 @@ in the directory of the current buffer."
   (sly-eval-async
       `(slynk-asdf:operate-on-system-for-emacs ,system ',operation ,@keyword-args)
     #'(lambda (result)
-        (sly-compilation-finished result (current-buffer))
+        (sly-asdf-oos-finished result (current-buffer))
         (run-hooks 'sly-asdf--after-oos-hook))))
 
+
+(defun sly-asdf-oos-finished (result buffer &optional message)
+  "Called when compilation is finished"
+  (let ((notes (sly-compilation-result.notes result))
+        (duration (sly-compilation-result.duration result))
+        (successp (sly-compilation-result.successp result)))
+    (sly-show-note-counts notes duration successp t)
+    (setf sly-last-compilation-result result) ;; For interactive use
+    (when sly-highlight-compiler-notes
+      (sly-highlight-notes notes))
+    ;; Conditionally show compilation log and other options defined in settings
+    (run-hook-with-args 'sly-compilation-finished-hook successp notes buffer t)))
+
+    
 
 ;;;###autoload
 (with-eval-after-load 'sly
