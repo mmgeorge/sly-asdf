@@ -89,8 +89,7 @@ on these directly to improve load-time error messages")
 Record compiler notes signalled as `compiler-condition's."
   (slynk-asdf:while-collecting-notes (:interactive nil)
                                      ;;(slynk::collect-notes
-                                     (apply #'operate-on-system system-name operation keywords)
-                                     ))
+                                     (apply #'operate-on-system system-name operation keywords)))
 
 
 (defslyfun list-all-systems-in-central-registry ()
@@ -188,17 +187,10 @@ already knows."
             do (delete-file file))))
     (format nil "~d file~:p ~:*~[were~;was~:;were~] removed" removed-count)))
 
-
-;; (defun stack ()
-;;   (loop for frame = (sb-di:frame-down (sb-di:top-frame))
-;;           then (sb-di:frame-down frame)
-;;         while frame
-;;         collect frame))
-
-
 (defun collect-notes (function interactive)
   "Includes additional asdf specific logic from `slynk::collect-notes`"
-  (let ((notes '()))
+  (let ((notes '())
+        (restart-p nil)) ;; Denotes a critical failure
     ;; Filter unbound-variable errors that have a corresponding undefined-variable warning.
     ;; The undefined-variable warning provides a better warning with a precise source error
     ;; location (at least on SBCL)
@@ -224,7 +216,8 @@ already knows."
                             (when (and (error-p c) (not interactive)) ;; For warnings, we do not need to restart
                               ;; We may be loading a system in which case we would
                               ;; have an accept restart that we can use to continue
-                              ;; compilation
+                              ;; compilation. Either way, mark has having restarted
+                              (setf restart-p t)
                               (let ((accept (find-restart 'asdf/action:accept)))
                                 (if accept
                                     (invoke-restart accept)
@@ -235,16 +228,13 @@ already knows."
                ;; for errors in EVAL-WHEN or during macroexpansion.
                (restart-case (multiple-value-list (funcall function))
                  (abort () :report "Abort compilation." (list nil))))))
-        (destructuring-bind (successp &optional loadp faslfile) result
-          (let ((faslfile (etypecase faslfile
-                            (null nil)
-                            (pathname (pathname-to-filename faslfile)))))
-            (slynk::make-compilation-result :notes (remove-if #'redundant-note-p notes)
-                                            :duration seconds
-                                            :successp (if successp t)
-                                            :loadp (if loadp t)
-                                            :faslfile faslfile)))))))
-
+        (let ((notes (remove-if #'redundant-note-p notes)))
+          (slynk::make-compilation-result :notes notes
+                                          :duration seconds
+                                          :successp (not restart-p)
+                                          :loadp t
+                                          :faslfile nil))))))
+        
 
 (defun asdf-condition-p (condition)
   (member (type-of condition) *asdf-condition-types*))
