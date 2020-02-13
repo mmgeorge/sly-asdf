@@ -5,7 +5,7 @@
  
 ## About
 
-SLY-ASDF is a contrib for [SLY](https://github.com/joaotavora/sly) that adds support for editing ASDF systems, exposing several utilities for working with and loading systems. When using the built-in system load utlity, accessed via `, + load-system` from the repl, ASDF system compilation and load errors will be trapped and recorded as with other sly compilation errors, as opposed to getting dumped into with calling `asdf:load-system` directly.
+SLY-ASDF is a contrib for [SLY](https://github.com/joaotavora/sly) that adds support for editing ASDF systems, exposing several utilities for working with and loading systems. When using the built-in system load utlity, accessed via `, + load-system` from the repl, ASDF system compilation and load errors will be trapped and recorded as with other sly compilation errors, as opposed to dumping into the debugger like with calling `asdf:load-system` directly.
 
 Ported from [slime](https://github.com/slime/slime/blob/master/contrib/slime-asdf.el) with changes to support [`package-inferred-system`](https://common-lisp.net/project/asdf/asdf/The-package_002dinferred_002dsystem-extension.html). Potentially I'd like to make some future changes to improve debugging ASDF systems (e.g., cut off stack trace at system boundaries, etc.)
 
