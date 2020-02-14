@@ -42,6 +42,7 @@
 (defvar sly-asdf-shortcut-alist
   '(("load-system" . sly-asdf-load-system)
     ("reload-system" . sly-asdf-reload-system)
+    ("test-system" . sly-asdf-test-system)
     ("browse-system" . sly-asdf-browse-system)
     ("open-system" . sly-asdf-open-system)
     ("save-system" . sly-asdf-save-system)))
@@ -95,6 +96,13 @@ Default system name is taken from first file matching *.asd in current
 buffer's working directory"
   (interactive (list (sly-asdf-read-system-name)))
   (sly-asdf-oos system 'compile-op))
+
+(defun sly-asdf-test-system (&optional system)
+  "Compile and test an ASDF SYSTEM.
+Default system name is taken from first file matching *.asd in current
+buffer's working directory"
+  (interactive (list (sly-asdf-read-system-name)))
+  (sly-asdf-oos system 'test-op :force t))
 
 
 (defun sly-asdf-save-system (system)
