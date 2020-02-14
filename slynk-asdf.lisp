@@ -1,4 +1,3 @@
-
 ;;; Slynk-asdf.lisp -- ASDF support
 ;;; Ported from swank-asdf <https://github.com/slime/slime/blob/master/contrib/swank-asdf.lisp>
 ;; Authors: Daniel Barlow <dan@telent.net>
@@ -252,7 +251,6 @@ already knows."
 
 (defun make-compiler-note (condition)
   "Make a compiler note data structure from a compiler-condition."
-  ;;(declare (type compiler-condition condition))
   (if (asdf-condition-p (original-condition condition))
       (make-asdf-note (original-condition condition))
       (unless (member (severity condition) '(:redefinition))
