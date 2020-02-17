@@ -285,14 +285,18 @@ in the directory of the current buffer."
                        'sly-asdf-system-history default-value))))
 
 
-(cl-defun sly-asdf-find-current-system (&optional (buffer (car (sly-asdf--current-lisp-buffers))))
+(cl-defun sly-asdf-find-current-system (&optional buffer)
   "Find the name of the current asd system."
-  (when buffer
-    (let* ((buffer-file-name (buffer-file-name buffer ))
-           (directory (file-name-directory buffer-file-name))
-           (system-file (sly-asdf-find-system-file directory)))
-      (when system-file
-        (file-name-base system-file)))))
+  (setf buffer (or buffer
+                   (cl-find-if #'buffer-file-name (sly-asdf--current-lisp-buffers))
+                   (current-buffer)))
+  (let* ((buffer-file-name (buffer-file-name buffer))
+         (directory (if buffer-file-name
+                        (file-name-directory buffer-file-name)
+                      default-directory))
+         (system-file (sly-asdf-find-system-file directory)))
+    (when system-file
+      (file-name-base system-file))))
 
 
 (cl-defun sly-asdf-find-system-file (directory &optional (depth sly-asdf-find-system-file-max-depth))
