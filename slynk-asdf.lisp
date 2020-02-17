@@ -684,6 +684,7 @@ return it if it is of the form (:file FILENAME :pos NUMBER)"
   (format t "~A" (+ 1 a)))
 
 
+#+sbcl
 (defun breakpoint-add (function)
   "Warning! SBCL only"
   ;; Or should we be recompiling function with a (break) in the proper location?
@@ -691,7 +692,7 @@ return it if it is of the form (:file FILENAME :pos NUMBER)"
     (unless (sb-int:encapsulated-p function 'breakpoint)
       (sb-int:encapsulate function 'breakpoint #'call-with-breakpoint))))
 
-
+#+sbcl
 (defun breakpoint-remove (function)
   (when (sb-int:encapsulated-p function 'breakpoint)
     (sb-int:unencapsulate function 'breakpoint)))
