@@ -217,10 +217,13 @@ already knows."
                               ;; have an accept restart that we can use to continue
                               ;; compilation. Either way, mark has having restarted
                               (setf restart-p t)
-                              (let ((accept (find-restart 'asdf/action:accept)))
-                                (if accept
-                                    (invoke-restart accept)
-                                    (invoke-restart 'abort)))))))
+                              ;; Recovering from errors can be fairly unintuitive
+                              ;; see :cascading-errors system and issue #29. Disable for now
+                              ;; (let ((accept (find-restart 'asdf/action:accept)))
+                              ;;   (if accept
+                              ;;       (invoke-restart accept)
+                              ;;       (invoke-restart 'abort)))
+                              (invoke-restart 'abort)))))
             (slynk::measure-time-interval
              (lambda ()
                ;; To report location of error-signaling toplevel forms
