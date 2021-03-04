@@ -343,7 +343,7 @@ in the directory of the current buffer."
     ;; Conditionally show compilation log and other options defined in settings
     (run-hook-with-args 'sly-compilation-finished-hook successp notes buffer t)))
 
-    
+
 
 ;;;###autoload
 (with-eval-after-load 'sly
