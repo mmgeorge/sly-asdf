@@ -339,6 +339,7 @@ in the directory of the current buffer."
     (setf sly-last-compilation-result result) ;; For interactive use
     (when sly-highlight-compiler-notes
       (sly-highlight-notes notes))
+    (when message (message message))
     ;; Conditionally show compilation log and other options defined in settings
     (run-hook-with-args 'sly-compilation-finished-hook successp notes buffer t)))
 
