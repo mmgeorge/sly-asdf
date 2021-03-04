@@ -178,26 +178,21 @@ buffer's working directory"
     (isearch-forward)))
 
 
-(defun sly-asdf-query-replace-system (_name from to &optional delimited)
-  "Run `query-replace' on an ASDF system with NAME given FROM and TO with optional DELIMITED."
-  ;; MG: Underscore added to _name to suppress an unused-lexical-arg warning that fires
-  ;; despite the var being used in the condition-case below.
+(defun sly-asdf-query-replace-system (name from to &optional delimited)
+  "Query-replace in all files of an ASDF system.
+
+NAME is the ASDF's sytem name, FROM is the string to replace, TO
+its replacement, and the optional DELIMITED when true restricts
+replacements to word-delimited matches."
   (interactive (let ((system (sly-asdf-read-system-name)))
                  (cons system (sly-asdf-read-query-replace-args
                                "Query replace throughout `%s'" system))))
-  (condition-case c
-      ;; `tags-query-replace' actually uses `query-replace-regexp'
-      ;; internally.
-      (tags-query-replace (regexp-quote from) to delimited
-                          '(mapcar 'sly-from-lisp-filename
-                                   (sly-eval `(slynk-asdf:asdf-system-files ,_name))))
-    (error
-     ;; Kludge: `tags-query-replace' does not actually return but
-     ;; signals an unnamed error with the below error
-     ;; message. (<=23.1.2, at least.)
-     (unless (string-equal (error-message-string c) "All files processed")
-       (signal (car c) (cdr c)))        ; resignal
-     t)))
+  (fileloop-initialize-replace
+   (regexp-quote from) to 'default
+   (mapcar #'sly-from-lisp-filename
+           (sly-eval `(slynk-asdf:asdf-system-files ,name)))
+   delimited)
+  (fileloop-continue))
 
 
 (defun sly-asdf-query-replace-system-and-dependents
