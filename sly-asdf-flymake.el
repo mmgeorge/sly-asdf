@@ -6,9 +6,6 @@
 
 (defvar sly-asdf-enable-experimental-syntax-checking nil)
 
-(defvar *sly-asdf-lisp-extensions* (list "lisp")
-  "File extensions to look for when finding open Lisp files.")
-
 (defvar sly-asdf--buffer-to-system (make-hash-table))
 (defvar sly-asdf--system-to-buffers (make-hash-table))
 (defvar sly-asdf--last-lisp-buffers nil)
@@ -304,15 +301,12 @@ not pass the diagnostic's buffer to `make-overlay`."
           (popup-tip (sly-asdf-flymake-base-diagnostic-text (car diags)) :point point))))))
 
 
+;; Activate (upon value of `sly-asdf-enable-experimental-syntax-checking')
+(add-hook 'sly-connected-hook
+          ;; MG: Investigate race, due to when ASDF loads?
+          ;; OC: Is this still a problem after decoupling from sly-asdf?
+          (lambda () (run-with-idle-timer .5 nil #'sly-asdf-flymake)))
 
-(defun sly-asdf--lisp-buffer-p (buffer)
-  "Check whether BUFFER refers to a Lisp buffer."
-  (member (file-name-extension (buffer-name buffer)) *sly-asdf-lisp-extensions*))
-
-
-(defun sly-asdf--current-lisp-buffers ()
-  "Traverses the current `buffer-list`, returning those buffers with a .lisp extension."
-  (cl-remove-if-not #'sly-asdf--lisp-buffer-p (buffer-list)))
 
 
 (provide 'sly-asdf-flymake)

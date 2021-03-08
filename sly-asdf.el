@@ -32,7 +32,6 @@
 (require 'sly)
 (require 'cl-lib)
 (require 'grep)
-(require 'sly-asdf-flymake)
 
 (defvar sly-mrepl-shortcut-alist) ;; declared in sly-mrepl
 
@@ -58,11 +57,21 @@
   (:license "GPL")
   (:slynk-dependencies slynk-asdf)
   (:on-load
-   (add-hook 'sly-connected-hook
-             ;; MG: Investigate race, due to when ASDF loads?
-             (lambda () (run-with-idle-timer .5 nil #'sly-asdf-flymake)))
    (setq sly-mrepl-shortcut-alist
          (append sly-mrepl-shortcut-alist sly-asdf-shortcut-alist))))
+
+
+(defvar *sly-asdf-lisp-extensions* (list "lisp")
+  "File extensions to look for when finding open Lisp files.")
+
+(defun sly-asdf--lisp-buffer-p (buffer)
+  "Check whether BUFFER refers to a Lisp buffer."
+  (member (file-name-extension (buffer-name buffer)) *sly-asdf-lisp-extensions*))
+
+
+(defun sly-asdf--current-lisp-buffers ()
+  "Traverses the current `buffer-list`, returning those buffers with a .lisp extension."
+  (cl-remove-if-not #'sly-asdf--lisp-buffer-p (buffer-list)))
 
 
 ;;; Interactive functions
