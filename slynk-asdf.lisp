@@ -23,7 +23,7 @@
 (defvar *current-source-file* nil)
 (defvar *asdf-condition-types*
   '(;; System definition related
-    asdf/parse-defsystem:bad-system-name
+    #-ecl asdf/parse-defsystem:bad-system-name
     asdf:load-system-definition-error
     ;; asdf/plan::dependency-not-done
     uiop/lisp-build:compile-file-error
@@ -283,8 +283,8 @@ already knows."
                 :type (type-of condition)
                 :asdf t))))
     ;; Clobber for now
-    ((or asdf/parse-defsystem:bad-system-name
-         ;; MG: asdf/plan::dependency-not-done requires 3.3.1.4. 
+    ((or #-ecl asdf/parse-defsystem:bad-system-name
+         ;; MG: asdf/plan::dependency-not-done requires 3.3.1.4.
          ;; Be sure to also uncomment the corresponding statement in *asdf-condition-types*
          ;; https://github.com/fare/asdf/commit/6cba911f89e15bcde00cced5248190b4d747ab90
          ;; asdf/plan::dependency-not-done
