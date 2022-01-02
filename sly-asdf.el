@@ -197,9 +197,10 @@ replacements to word-delimited matches."
                  (cons system (sly-asdf-read-query-replace-args
                                "Query replace throughout `%s'" system))))
   (fileloop-initialize-replace
-   (regexp-quote from) to 'default
+   (regexp-quote from) to
    (mapcar #'sly-from-lisp-filename
            (sly-eval `(slynk-asdf:asdf-system-files ,name)))
+    'default
    delimited)
   (fileloop-continue))
 
