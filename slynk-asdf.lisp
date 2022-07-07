@@ -263,7 +263,7 @@ already knows."
   (if (and (eq (car location) :error)
            *current-source-file*)
       (slynk-backend:make-location
-       `(:file ,(namestring (asdf:component-pathname *current-source-file*)))
+       `(:file ,(namestring (translate-logical-pathname (asdf:component-pathname *current-source-file*))))
        `(:position 0))
       location))
 
