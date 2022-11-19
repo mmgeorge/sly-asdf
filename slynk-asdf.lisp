@@ -96,7 +96,11 @@ Record compiler notes signalled as `compiler-condition's."
 AND in its source-registry. (legacy name)"
   (unique-string-list
    (mapcar
-    #'pathname-name
+    (lambda (asd)
+      (typecase asd
+        (pathname (pathname-name asd))
+        (string asd)
+        (t asd)))
     (while-collecting (c)
                       (loop for dir in asdf:*central-registry*
                          for defaults = (eval dir)
