@@ -773,11 +773,28 @@ Example:
       (mapcar #'dep-pathname (asdf-inferred-system-deps system)))))
 
 
+(defun dependency-def-name (dep)
+  "Extract the plain system name from an ASDF dependency-def. A :depends-on entry
+may be a bare name or a list form — (:version NAME ...), (:require NAME), or
+(:feature FEATURE DEP) — none of which are valid component designators on their
+own, so they must be reduced to a name before FIND-SYSTEM is called on them."
+  (if (consp dep)
+      (case (first dep)
+        ((:version :require) (dependency-def-name (second dep)))
+        (:feature (dependency-def-name (third dep)))
+        (t dep))
+      dep))
+
+
 (defun asdf-inferred-system-deps (system &optional (visited nil))
   ;; A "proper-dep" is a dependency with the same primary system name (i.e., not an external library)
   (flet ((proper-dep-p (dep) (string-equal (asdf:primary-system-name dep) (asdf:primary-system-name system)))
          (recurse (prev dep) (asdf-inferred-system-deps dep prev)))
-    (let* ((proper-deps (remove-if-not #'proper-dep-p (mapcar #'asdf:find-system (asdf:system-depends-on system))))
+    (let* ((proper-deps (remove-if-not #'proper-dep-p
+                                       (remove nil
+                                               (mapcar (lambda (dep)
+                                                         (asdf:find-system (dependency-def-name dep) nil))
+                                                       (asdf:system-depends-on system)))))
            (unvisited-deps (set-difference proper-deps visited :test #'component-equal)))
       (reduce #'recurse unvisited-deps :initial-value (append unvisited-deps visited)))))
 
