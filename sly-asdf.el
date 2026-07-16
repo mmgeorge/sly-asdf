@@ -164,27 +164,11 @@ buffer's working directory"
 
 
 (defun sly-asdf-isearch-system (sys-name)
-  "Run function `isearch-forward' on the files of an ASDF system SYS-NAME."
+  "Run `multi-isearch-files' on the files of ASDF system SYS-NAME."
   (interactive (list (sly-asdf-read-system-name nil nil)))
-  (let* ((files (mapcar 'sly-from-lisp-filename
-                        (sly-eval `(slynk-asdf:asdf-system-files ,sys-name))))
-         (multi-isearch-next-buffer-function
-          (let*
-              ((buffers-forward  (mapcar #'find-file-noselect files))
-               (buffers-backward (reverse buffers-forward)))
-            #'(lambda (current-buffer wrap)
-                ;; Contrarily to the docstring of
-                ;; `multi-isearch-next-buffer-function', the first
-                ;; arg is not necessarily a buffer. Report sent
-                ;; upstream. (2009-11-17)
-                (setq current-buffer (or current-buffer (current-buffer)))
-                (let* ((buffers (if isearch-forward
-                                    buffers-forward
-                                  buffers-backward)))
-                  (if wrap
-                      (car buffers)
-                    (cl-second (memq current-buffer buffers))))))))
-    (isearch-forward)))
+  (multi-isearch-files
+   (mapcar #'sly-from-lisp-filename
+           (sly-eval `(slynk-asdf:asdf-system-files ,sys-name)))))
 
 
 (defun sly-asdf-query-replace-system (name from to &optional delimited)
